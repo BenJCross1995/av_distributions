@@ -99,66 +99,66 @@ def performance(
     score_col: str,
     target_col: str,
     df_test: pd.DataFrame = None,
-    additional_metadata: dict = None
+    additional_metadata: dict = None,
+    keep_cols: list = None
 ) -> pd.DataFrame:
     """
-    Evaluate various speaker-verification metrics on a dataset.
-
-    If df_test is None, uses Leave-One-Out cross-validation on df_train.
-    Otherwise, trains on df_train and evaluates on df_test.
+    Evaluate speaker-verification metrics and optionally carry through metadata columns.
 
     Parameters:
-    - df_train: DataFrame containing scores and true labels for training/calibration
-    - score_col: column name of system scores (posterior probabilities)
-    - target_col: column name of boolean/integer true labels (1=target, 0=non-target)
-    - df_test: optional DataFrame for evaluation (same columns as df_train)
-    - additional_metadata: optional dict to prepend to output (e.g. corpus/model info)
+    - df_train: DataFrame for training or cross-validation
+    - score_col: column name for system scores (posterior probabilities)
+    - target_col: column name for true labels (1=target, 0=non-target)
+    - df_test: optional DataFrame for evaluation; if None, uses Leave-One-Out CV
+    - additional_metadata: dict of static metadata fields and values
+    - keep_cols: list of column names to extract from df_train as metadata;
+      each must be present and have a single unique value in df_train
 
     Returns:
-    - DataFrame with one row of metrics and metadata
+    - DataFrame with one row of metrics plus metadata
     """
-    # Decide between LOO CV or single train/test evaluation
+    # Prepare metadata dict
+    metadata = {} if additional_metadata is None else dict(additional_metadata)
+    if keep_cols:
+        for col in keep_cols:
+            if col not in df_train.columns:
+                raise KeyError(f"Column '{col}' not found in df_train")
+            unique_vals = df_train[col].unique()
+            if len(unique_vals) != 1:
+                raise ValueError(
+                    f"Column '{col}' must have a single unique value to use as metadata; found: {unique_vals}"
+                )
+            metadata[col] = unique_vals[0]
+
+    # Decide between LOO CV or train/test
     if df_test is None:
         loo = LeaveOneOut()
-        probs, llrs, truths = [], [], []
-
-        # Iterate each sample as the validation fold
+        probs, truths = [], []
         for train_idx, test_idx in loo.split(df_train):
             train_df = df_train.iloc[train_idx]
             test_row = df_train.iloc[test_idx]
-
-            # Fit logistic regression on score → posterior probability
             model = LogisticRegression(solver='lbfgs')
             model.fit(train_df[[score_col]], train_df[target_col])
-
-            # Predict probability of target class for held-out sample
             p = model.predict_proba(test_row[[score_col]])[:, 1][0]
             probs.append(p)
-
-            # Convert to log10 LLR and collect true label
-            llrs.append(np.log10(p / (1 - p)))
             truths.append(bool(test_row[target_col].iloc[0]))
-
-        # Assemble arrays for metric calculations
         pred_probs = np.array(probs)
-        pred_llrs = np.array(llrs)
+        pred_llrs = np.log10(pred_probs / (1 - pred_probs))
         y_true = np.array(truths)
     else:
-        # Train on entire training set
         model = LogisticRegression(solver='lbfgs')
         model.fit(df_train[[score_col]], df_train[target_col])
-        # Predict on held-back test set
         pred_probs = model.predict_proba(df_test[[score_col]])[:, 1]
         pred_llrs = np.log10(pred_probs / (1 - pred_probs))
         y_true = df_test[target_col].to_numpy()
 
-    # Core metrics
+    # Compute core metrics
     cllr = compute_cllr(pred_probs, y_true)
     cllr_min = compute_cllr_min(pred_probs, y_true)
     eer = compute_eer(pred_probs, y_true)
     auc_val = float(roc_auc_score(y_true, pred_probs))
 
-    # Threshold at LLR=0 (equal support) for classification metrics
+    # Classification at LLR=0 threshold
     y_pred = pred_llrs > 0
     bal_acc = float(balanced_accuracy_score(y_true, y_pred))
     precision = float(precision_score(y_true, y_pred))
@@ -166,16 +166,14 @@ def performance(
     f1 = float(f1_score(y_true, y_pred))
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
 
-    # Mean log10 LLR for true and false trials
+    # Log-likelihood stats
     mean_true_llr = float(np.mean(pred_llrs[y_true]))
     mean_false_llr = float(np.mean(pred_llrs[~y_true]))
-
-    # Count trials
     true_trials = int(np.sum(y_true))
     false_trials = int(len(y_true) - true_trials)
 
-    # Compile results dict
-    results = {
+    # Compile results and include metadata
+    metrics = {
         'Cllr': cllr,
         'Cllr_min': cllr_min,
         'EER': eer,
@@ -184,19 +182,14 @@ def performance(
         'Precision': precision,
         'Recall': recall,
         'F1': f1,
-        'TP': int(tp),
-        'FP': int(fp),
-        'FN': int(fn),
-        'TN': int(tn),
+        'TP': tp,
+        'FP': fp,
+        'FN': fn,
+        'TN': tn,
         'Mean_TRUE_LLR': mean_true_llr,
         'Mean_FALSE_LLR': mean_false_llr,
         'TRUE_trials': true_trials,
         'FALSE_trials': false_trials
     }
-
-    # Prepend any additional metadata fields
-    if additional_metadata:
-        results = {**additional_metadata, **results}
-
-    # Return as single-row DataFrame
+    results = {**metadata, **metrics}
     return pd.DataFrame([results])
