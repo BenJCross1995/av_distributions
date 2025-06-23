@@ -1,6 +1,7 @@
 import spacy
 
 import pandas as pd
+import re
 
 from nltk.tokenize import sent_tokenize
 
@@ -53,7 +54,7 @@ def load_ner_model(model="en_core_web_sm"):
     
     return nlp
 
-def process_text(text, model="en_core_web_sm"):
+def process_text(text, model):
     """
     Process the input text by performing Named Entity Recognition (NER), masking the entities,
     splitting the text into sentences, and then restoring the entities with their original text.
@@ -67,8 +68,7 @@ def process_text(text, model="en_core_web_sm"):
     """
     
     # Step 1: Perform Named Entity Recognition (NER)
-    nlp = load_ner_model(model)
-    doc = nlp(text)
+    doc = model(text)
     
     # Create a dictionary where the keys are the original entities and the values are placeholders
     entities = {ent.text: f"__ENTITY{idx}__" for idx, ent in enumerate(doc.ents)}
@@ -103,7 +103,7 @@ def process_text(text, model="en_core_web_sm"):
 
     return restored_sentences
 
-def preprocess_and_process_text(text, model="en_core_web_sm"):
+def preprocess_and_process_text(text, model):
     """
     Preprocesses the text by replacing '\\' with a placeholder, processes with NER and sentence splitting,
     then restores the '\\' placeholders back to '\\'.
@@ -131,22 +131,31 @@ def preprocess_and_process_text(text, model="en_core_web_sm"):
     
     return processed_sentences_with_backslashes
 
-def vectorize_df(df, model="en_core_web_sm"):
-    
-        df_copy = df.copy()
+def vectorize_df(df, model="en_core_web_sm", impostors=False):
+
+	# Step 1: Perform Named Entity Recognition (NER)
+	nlp_model = load_ner_model(model)
+	
+	df_copy = df.copy()
         
-        # Apply the function to the DataFrame
-        df_copy["sentence"] = df_copy["text"].apply(preprocess_and_process_text, model)
+	# Apply the function to the DataFrame
+	df_copy["sentence"] = df_copy["text"].apply(preprocess_and_process_text, model=nlp_model)
     
-        # Expand the processed sentences into separate rows if needed
-        expanded_df = df_copy.explode("sentence").reset_index(drop=True)
+	# Expand the processed sentences into separate rows if needed
+	expanded_df = df_copy.explode("sentence").reset_index(drop=True)
+
+	# Step 3: Add chunk_id column (sequential numbering grouped by doc_id)
+	if impostors:
+		expanded_df["chunk_id"] = expanded_df.groupby(["doc_id", "impostor_id"]).cumcount() + 1
+	else:
+		expanded_df["chunk_id"] = expanded_df.groupby("doc_id").cumcount() + 1
     
-        # Step 3: Add chunk_id column (sequential numbering grouped by doc_id)
-        expanded_df["chunk_id"] = expanded_df.groupby("doc_id").cumcount() + 1
-    
-        # Rename the "processed_sentences" column for clarity
-        expanded_df = expanded_df.rename(columns={"processed_sentences": "sentence"})
+	# Rename the "processed_sentences" column for clarity
+	expanded_df.rename(columns={"processed_sentences": "sentence"}, inplace=True)
+	
+	if impostors:
+		expanded_df = expanded_df[['corpus', 'doc_id', 'impostor_id', 'chunk_id', 'author', 'texttype', 'sentence']]
+	else:
+		expanded_df = expanded_df[['corpus', 'doc_id', 'chunk_id', 'author', 'texttype', 'sentence']]
         
-        expanded_df = expanded_df[['corpus', 'doc_id', 'chunk_id', 'author', 'texttype', 'sentence']]
-        
-        return expanded_df
+	return expanded_df
