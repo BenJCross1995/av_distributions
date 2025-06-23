@@ -225,7 +225,7 @@ def lambdaG(unknown, known, refs, metadata=None, N=10, r=30, cores=1, vectorise=
         
     return pd.DataFrame(results)
 
-def lambdaG_perplexity(unknown, known, refs, metadata=None, N=10, r=30, cores=1, vectorise=False):
+def lambdaG_paraphrase(unknown, known, refs, metadata=None, N=10, r=30, cores=1, vectorise=False):
     """
     Run the LambdaG author‐verification method.
 
@@ -266,56 +266,58 @@ def lambdaG_perplexity(unknown, known, refs, metadata=None, N=10, r=30, cores=1,
         # Filter the reference dataset
         refs_filtered = refs[~refs['author'].isin([known_author, unknown_author])]
 
-        known_perplexities   = known_filtered['perplexity'].tolist()     # length K
-        unknown_perplexities = unknown_filtered['perplexity'].tolist() # length U
-        refs_perplexities    = refs_filtered['perplexity'].tolist()   
+        known_sentences = known_filtered['tokens']
+        unknown_sentences = unknown_filtered['tokens']
 
-        # Dimensions
-        K = len(known_perplexities)
-        U = len(unknown_perplexities)
+        num_known_sentences = len(known_sentences)
+        num_unknown_sentences = len(unknown_sentences)
 
-        if K > len(refs_perplexities):
-            raise ValueError(f"Need at least {K} reference sentences, but only have {len(refs_perplexities)}")
-
-        # ── 1) Build the rank‐array: shape (r, U, K) ────────────────────────────────
-        # ranks[it, i, j] = rank of the genuine distance (unknown[i] - known[j])
-        #                  among the K impostor distances in iteration it.
-        ranks = np.zeros((r, U, K), dtype=float)
-
-
-        for it in range(r):
-            # 1a) sample one batch of K impostor references
-            ref_batch = random.sample(refs_perplexities, K)
-            
-            # 1b) compute impostor‐distance matrix: shape (U, K)
-            #     D_ref[i, m] = unknown_perplexities[i] - ref_batch[m]
-            D_ref = np.subtract.outer(unknown_perplexities, ref_batch)
-            
-            # 1c) for each unknown i, sort its impostor distances once
-            for i in range(U):
-                sorted_refs = np.sort(D_ref[i])
-                for j in range(K):
-                    # genuine distance for (unknown[i], known[j])
-                    d_known = unknown_perplexities[i] - known_perplexities[j]
-                    # rank = #impostors < d_known, plus one
-                    rank = np.searchsorted(sorted_refs, d_known, side='left') + 1
-                    ranks[it, i, j] = rank
-
-        # ── 2) Median over iterations → 2D matrix (U, K) ────────────────────────────
-        median_ranks = np.median(ranks, axis=0)
+        if num_known_sentences > len(refs_filtered):
+            raise ValueError(
+                f"Not enough reference sentences ({len(refs_filtered)}) to sample {num_known_sentences}"
+            )
         
-        # ── 3) Per‐sentence median across knowns → 1D array (U,) ────────────────────
-        sent_medians = np.median(median_ranks, axis=1)
+        # turn the Series into a list first
+        all_refs = refs_filtered['tokens'].tolist()
+
+        known_counts = extract_ngrams(known_sentences, N)
+
+        known_probs = []
+        for q in unknown_sentences:
+            ps = sentence_prob(q, known_counts, D=0.75, N=N)
+            # replace zeros
+            ps = [p if p > 0 else sys.float_info.min for p in ps]
+            known_probs.append(ps)
+
+        lambda_score = 0
         
-        # ── 4) Document‐level score: median of sentence medians ────────────────────
-        doc_score = float(np.median(sent_medians))
+        for _ in range(r):
+            ref_sentences = random.sample(all_refs, num_known_sentences)
+
+            ref_counts = extract_ngrams(ref_sentences, N)
+            
+            ref_probs = []
+            for q in unknown_sentences:
+                ps = sentence_prob(q, ref_counts, D=0.75, N=N)
+                # replace zeros
+                ps = [p if p > 0 else sys.float_info.min for p in ps]
+                ref_probs.append(ps)
+
+            lr_sum = 0.0
+            for kp_sent, rp_sent in zip(known_probs, ref_probs):
+                assert len(kp_sent) == len(rp_sent)
+                for k, r_ in zip(kp_sent, rp_sent):
+                    lr_sum += math.log10(k / r_)
+        
+            # 4. update lambda
+            lambda_score += lr_sum / r
 
         results.append({
             'problem': problem,
             'known_author': known_author,
             'unknown_author': unknown_author,
             'target': target,
-            'score': doc_score
+            'score': lambda_score
         })
         
     return pd.DataFrame(results)
