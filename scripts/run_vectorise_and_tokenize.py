@@ -9,7 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(__file__, "..", "..", "src")))
 
 from read_and_write_docs import read_jsonl, write_jsonl
 from preprocessing import vectorize_df
-from tokenize import score_dataframe
+from tokenize_and_score import score_dataframe
 
 def parse_args():
     p = argparse.ArgumentParser(

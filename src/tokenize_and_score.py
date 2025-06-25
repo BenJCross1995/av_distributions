@@ -83,7 +83,7 @@ def compute_perplexity(logprobs):
     """Sentence perplexity from natural‐log token log-probs."""
     return float(np.exp(-np.mean(logprobs)))
 
-def score_dataframe(df: pd.DataFrame, text_column: str = "text") -> pd.DataFrame:
+def score_dataframe_orig(df: pd.DataFrame, text_column: str = "text") -> pd.DataFrame:
     """
     Takes a dataframe with a column of texts and computes:
     - list of log-probs per token
