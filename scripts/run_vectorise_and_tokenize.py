@@ -16,22 +16,22 @@ def parse_args():
         description="Score a single JSONL file with token-level log-probs"
     )
     p.add_argument(
-        "--input-file",
+        "--input_file",
         required=True,
         help="Path to the input .jsonl file",
     )
     p.add_argument(
-        "--output-file",
+        "--output_file",
         required=True,
         help="Path where the scored .jsonl should be written",
     )
     p.add_argument(
-        "--model-loc",
+        "--model_loc",
         required=True,
         help="Local path or HuggingFace ID for the causal LM",
     )
     p.add_argument(
-        "--num-threads",
+        "--num_threads",
         type=int,
         default=None,
         help="Number of CPU threads to use (defaults to PyTorch’s choice)",
