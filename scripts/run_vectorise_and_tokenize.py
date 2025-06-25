@@ -5,10 +5,7 @@ import torch
 from pathlib import Path
 
 import nltk
-try:
-    nltk.data.find('tokenizers/punkt_tab')
-except LookupError:
-    nltk.download('punkt_tab', quiet=True)
+nltk.download('punkt_tab', quiet=True)
     
 # Ensure we can import from src/
 sys.path.append(os.path.abspath(os.path.join(__file__, "..", "..", "src")))
