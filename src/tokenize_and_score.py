@@ -106,7 +106,7 @@ def score_dataframe_orig(df: pd.DataFrame, text_column: str = "text") -> pd.Data
 def score_dataframe(
     df: pd.DataFrame,
     text_column: str = "text",
-    model_loc: str, 
+    model_loc: str  = "path/to/Qwen_2.5_1.5B"
 ) -> pd.DataFrame:
     """
     Adds token-level and aggregate scoring columns to `df[text_column]`.
