@@ -13,7 +13,7 @@ def load_model(model_loc: str):
     model.eval()
     return tokenizer, model
     
-def compute_log_probs_with_median(text: str):
+def compute_log_probs_with_median(text: str, tokenizer, model):
     """
     For each token (excluding first), return:
     - tokens: list of tokens in the text
@@ -52,32 +52,6 @@ def compute_log_probs_with_median(text: str):
     tokens = tokens[0:]  # Match the length of log_probs and median_logprobs
     
     return tokens, log_probs, median_logprobs
-    
-def compute_log_probs_with_median(text: str, tokenizer, model):
-    """
-    Token-level log-probs and median log-prob for each token in `text`.
-    Returns (tokens, log_probs, median_logprobs).
-    """
-    inputs = tokenizer(text, return_tensors="pt")
-    input_ids = inputs["input_ids"]
-    # decode to token strings
-    tokens = tokenizer.convert_ids_to_tokens(input_ids[0])
-    
-    with torch.no_grad():
-        outputs = model(input_ids)
-    logits = outputs.logits  # [1, seq_len, vocab_size]
-
-    log_probs = []
-    medians   = []
-    for i in range(input_ids.size(1)):
-        # take logits *before* generating token i
-        prev_logits = logits[0, i - 1] if i > 0 else logits[0, 0]
-        dist = torch.log_softmax(prev_logits, dim=-1)
-        token_id = input_ids[0, i].item()
-        log_probs.append(dist[token_id].item())
-        medians.append(float(dist.median().item()))
-    
-    return tokens, log_probs, medians
     
 def compute_perplexity(logprobs):
     """Sentence perplexity from natural‐log token log-probs."""
@@ -132,7 +106,7 @@ def score_dataframe_orig(df: pd.DataFrame, text_column: str = "text") -> pd.Data
 def score_dataframe(
     df: pd.DataFrame,
     text_column: str = "text",
-    model_loc: str  = "path/to/Qwen_2.5_1.5B"
+    model_loc: str, 
 ) -> pd.DataFrame:
     """
     Adds token-level and aggregate scoring columns to `df[text_column]`.
