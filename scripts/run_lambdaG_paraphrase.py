@@ -74,10 +74,6 @@ def main():
     filtered_metadata = metadata[metadata['corpus'].isin(selected_corpus)]
     agg_metadata = build_metadata_df(filtered_metadata, known, unknown)
 
-    
-    results = lambdaG_paraphrase(unknown, known_filtered,
-                             metadata=agg_metadata, impostor_loc=impostor_loc)
-
     all_results = []
     for rep in range(1, args.num_repetitions + 1):
         print(f"Repetition {rep}")
