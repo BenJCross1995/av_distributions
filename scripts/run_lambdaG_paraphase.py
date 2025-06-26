@@ -70,7 +70,7 @@ def main():
     unknown = unknown[unknown['num_tokens'] > 0]
 
     # Metadata preprocess
-    metadata = read_rds(metadata_loc)
+    metadata = read_rds(args.metadata_loc)
     filtered_metadata = metadata[metadata['corpus'].isin(selected_corpus)]
     agg_metadata = build_metadata_df(filtered_metadata, known, unknown)
 
