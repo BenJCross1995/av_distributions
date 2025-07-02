@@ -154,7 +154,7 @@ def vectorize_df(df, model="en_core_web_sm", impostors=False):
 	expanded_df.rename(columns={"processed_sentences": "sentence"}, inplace=True)
 	
 	if impostors:
-		expanded_df = expanded_df[['corpus', 'doc_id', 'impostor_id', 'chunk_id', 'author', 'texttype', 'sentence']]
+		expanded_df = expanded_df[['corpus', 'doc_id', 'impostor_id', 'chunk_id', 'author', 'texttype', 'sentence', 'parascore_free']]
 	else:
 		expanded_df = expanded_df[['corpus', 'doc_id', 'chunk_id', 'author', 'texttype', 'sentence']]
         
