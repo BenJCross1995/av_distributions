@@ -64,7 +64,7 @@ def main():
     # 1) Read & normalize
     df = read_jsonl(str(in_path))
     df['impostor_id'] = df.index + 1
-    df = df[['doc_id', 'corpus', 'impostor_id', 'author', 'texttype', 'rephrased']]
+    df = df[['doc_id', 'corpus', 'impostor_id', 'author', 'texttype', 'rephrased', 'parascore_free']]
     df = df.rename(columns={'rephrased': 'text'})
 
     # 2) Vectorize
