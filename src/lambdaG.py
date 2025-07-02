@@ -1,4 +1,5 @@
 import math
+import nltk
 import random
 import sys
 
@@ -7,6 +8,8 @@ import pandas as pd
 
 from collections import Counter, defaultdict
 from itertools import product, islice
+from nltk.lm import KneserNeyInterpolated
+from nltk.lm.preprocessing import padded_everygram_pipeline, padded_everygrams
 
 from read_and_write_docs import read_jsonl
 
@@ -75,6 +78,38 @@ def problem_data_prep(
     print(f"    There are {len(known_authors)} known author(s) and {len(problem_df)} problem(s) in the dataset.")
     return problem_df
 
+def build_kn_model(sentences, N):
+    """
+    Build an N-gram language model with Kneser-Ney smoothing.
+
+    Parameters:
+    - sentences: List[List[str]] -- tokenized sentences
+    - N: int -- order of the model (n-gram length)
+    """
+    train_data, vocab = padded_everygram_pipeline(N, sentences)
+    model = KneserNeyInterpolated(order=N)
+    model.fit(train_data, vocab)
+    return model
+
+def sentence_log10_prob(model, tokens, N):
+    """
+    Compute log10 probability of a token list under the given language model.
+
+    Parameters:
+    - model: KneserNeyInterpolated
+    - tokens: List[str] -- one tokenized sentence
+    - N: int
+    """
+    logp = 0.0
+    for ngram in padded_everygrams(N, tokens):
+        context, word = tuple(ngram[:-1]), ngram[-1]
+        p = model.score(word, context)
+        # Replace zeros with the smallest positive float
+        if p <= 0:
+            p = sys.float_info.min
+        logp += math.log10(p)
+    return logp
+
 def extract_ngrams(sentences, N):
     """Return Counter of all k‑grams (size 1..N) across sentences, padded."""
     counts = {n: Counter() for n in range(1, N+1)}
@@ -84,6 +119,23 @@ def extract_ngrams(sentences, N):
             for i in range(len(tokens)-n+1):
                 ngram = tuple(tokens[i:i+n])
                 counts[n][ngram] += 1
+    return counts
+
+def extract_ngrams(sentences, N):
+    """
+    Return a dict mapping each n (1..N) to a Counter of n-grams,
+    with (N−1) '<s>' pads and one '</s>' pad per sentence.
+    """
+    counts = {n: Counter() for n in range(1, N+1)}
+    for sent in sentences:
+        # pad once
+        tokens = ['<s>']*(N-1) + sent + ['</s>']
+        # for each n, produce all n-grams in one go via a generator
+        for n in range(1, N+1):
+            # zip(*(tokens[i:] for i in range(n))) is a very fast way to
+            # slide an n-length window across tokens without slicing
+            grams = zip(*(tokens[i:] for i in range(n)))
+            counts[n].update(grams)
     return counts
 
 def continuation_counts(counts, n):
@@ -216,6 +268,88 @@ def lambdaG(unknown, known, refs=None, metadata=None, N=10, r=30, cores=1, vecto
         
             # 4. update lambda
             lambda_score += lr_sum / r
+
+        results.append({
+            'problem': problem,
+            'known_author': known_author,
+            'unknown_author': unknown_author,
+            'target': target,
+            'score': lambda_score
+        })
+        
+    return pd.DataFrame(results)
+
+def lambdaG_v2(unknown, known, refs=None, metadata=None, N=10, r=30, cores=1, vectorise=False):
+    """
+    Run the LambdaG author‐verification method.
+
+    Parameters:
+    - unknown   (pandas.DataFrame): DataFrame of questioned (disputed) documents.
+    - known     (pandas.DataFrame): DataFrame of known (undisputed) documents.
+    - refs      (pandas.DataFrame, optional): Reference corpus for calibration. This can be the same as known.
+    - metadata  (pandas.DataFrame, optional): A dataframe of problem metadata, used if known contains more than one author.
+    - N         (int, optional): Order of the model (n-gram length). Default is 10.
+    - r         (int, optional): Number of iterations/bootstrap samples. Default is 30.
+    - cores     (int, optional): Number of CPU cores for parallel processing. Default is 1.
+    - vectorise (bool, optional): If True, splits documents into sentences before feature extraction. Default is False.
+
+    Returns:
+    - pandas.DataFrame: Uncalibrated log-likelihood ratios (LambdaG) for each document in `unknown`.
+    """
+
+    problem_df = problem_data_prep(unknown, known, metadata)
+
+    if vectorise:
+        print("Vectorising data into sentences")
+        # NOTE - Need to add in vetorising method
+        
+    total = len(problem_df)
+    results = []
+    for idx, row in problem_df.iterrows():
+        known_author = row['known_author']
+        unknown_author = row['unknown_author']
+        problem = row['problem']
+        target = known_author == unknown_author
+        
+        print(f"        Working on problem {idx+1} of {total}: {problem}")
+
+        # Filter the known and unknown for the current problem
+        known_filtered = known[known['author'] == known_author]
+        unknown_filtered = unknown[unknown['author'] == unknown_author]
+
+        # Filter the reference dataset
+        refs_filtered = refs[~refs['author'].isin([known_author, unknown_author])]
+
+        known_sentences = known_filtered['tokens']
+        unknown_sentences = unknown_filtered['tokens']
+
+        num_known_sentences = len(known_sentences)
+        num_unknown_sentences = len(unknown_sentences)
+
+        if num_known_sentences > len(refs_filtered):
+            raise ValueError(
+                f"Not enough reference sentences ({len(refs_filtered)}) to sample {num_known_sentences}"
+            )
+        
+        # turn the Series into a list first
+        all_refs = refs_filtered['tokens'].tolist()
+
+        # Build the candidate model
+        k_model = build_kn_model(known_sentences, N)
+        # Precompute known vs unknown log-probs
+        known_logps = [sentence_log10_prob(k_model, sent, N) for sent in unknown_sentences]
+
+        lambda_score = 0
+        
+        for _ in range(r):
+            ref_sentences = random.sample(all_refs, num_known_sentences)
+
+            ref_model = build_kn_model(ref_sentences, N)
+            ref_logps = [sentence_log10_prob(ref_model, sent, N) for sent in unknown_sentences]
+
+            # Sum per-sentence log-LR
+            lr = sum(k - r_ for k, r_ in zip(known_logps, ref_logps))
+            lambda_score += lr / r
 
         results.append({
             'problem': problem,
