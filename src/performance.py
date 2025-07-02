@@ -177,6 +177,10 @@ def performance(
         'Cllr': cllr,
         'Cllr_min': cllr_min,
         'EER': eer,
+        'Mean_TRUE_LLR': mean_true_llr,
+        'Mean_FALSE_LLR': mean_false_llr,
+        'TRUE_trials': true_trials,
+        'FALSE_trials': false_trials,
         'AUC': auc_val,
         'Balanced_Accuracy': bal_acc,
         'Precision': precision,
@@ -186,10 +190,7 @@ def performance(
         'FP': fp,
         'FN': fn,
         'TN': tn,
-        'Mean_TRUE_LLR': mean_true_llr,
-        'Mean_FALSE_LLR': mean_false_llr,
-        'TRUE_trials': true_trials,
-        'FALSE_trials': false_trials
     }
     results = {**metadata, **metrics}
+    
     return pd.DataFrame([results])
