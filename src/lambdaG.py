@@ -182,6 +182,76 @@ def sentence_prob(sent, counts, D=0.75, N=3):
         probs.append(p)
     return probs
 
+def cosine_similarity(
+    vec1: np.ndarray,
+    vec2: np.ndarray
+) -> float:
+    """
+    Compute the cosine similarity between two vectors.
+
+    Args:
+        vec1 (np.ndarray): First vector.
+        vec2 (np.ndarray): Second vector.
+
+    Returns:
+        float: Cosine similarity score between -1 and 1.
+    """
+    # Convert inputs to numpy arrays
+    v1 = np.array(vec1, dtype=float)
+    v2 = np.array(vec2, dtype=float)
+
+    # Compute dot product and norms
+    dot_prod = np.dot(v1, v2)
+    norm1 = np.linalg.norm(v1)
+    norm2 = np.linalg.norm(v2)
+
+    if norm1 == 0 or norm2 == 0:
+        raise ValueError("One or both vectors have zero magnitude, cosine similarity is undefined.")
+
+    return dot_prod / (norm1 * norm2)
+
+def get_top_n_closest(
+    df: pd.DataFrame,
+    query_vec: np.ndarray,
+    embedding_column: str = 'embedding',
+    top_n: int = 5
+) -> pd.DataFrame:
+    """
+    Retrieve the top N rows from a DataFrame whose embeddings are closest to a query vector.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing an embedding column.
+        query_vec (np.ndarray or list): The query embedding vector.
+        embedding_column (str): Name of the column with embeddings.
+        top_n (int): Number of top similar rows to return.
+
+    Returns:
+        pd.DataFrame: Subset of the original DataFrame sorted by descending similarity,
+                      with an additional 'similarity' column.
+    """
+    # Validate input
+    if embedding_column not in df.columns:
+        raise ValueError(f"Embedding column '{embedding_column}' not found in DataFrame.")
+
+    # Convert query vector to numpy array
+    qv = np.array(query_vec, dtype=float)
+    if np.linalg.norm(qv) == 0:
+        raise ValueError("Query vector has zero magnitude, cosine similarity is undefined.")
+
+    # Compute similarities
+    sims = []
+    for emb in df[embedding_column]:
+        sims.append(cosine_similarity(qv, np.array(emb, dtype=float)))
+
+    # Create a copy with similarity scores
+    df_with_sim = df.copy()
+    df_with_sim['similarity'] = sims
+
+    # Sort and select top N
+    top_df = df_with_sim.sort_values(by='similarity', ascending=False).head(top_n)
+
+    return top_df.reset_index(drop=True)
+    
 def lambdaG(unknown, known, refs=None, metadata=None, N=10, r=30, cores=1, vectorise=False):
     """
     Run the LambdaG author‐verification method.
@@ -279,9 +349,9 @@ def lambdaG(unknown, known, refs=None, metadata=None, N=10, r=30, cores=1, vecto
         
     return pd.DataFrame(results)
 
-def lambdaG_v2(unknown, known, refs=None, metadata=None, N=10, r=30, cores=1, vectorise=False):
+def lambdaG_max_similarity(unknown, known, refs=None, metadata=None, N=10, r=30, cores=1, vectorise=False, embed=False):
     """
-    Run the LambdaG author‐verification method.
+    Run the LambdaG author‐verification method, instead of random sampling of sentences take the most similar.
 
     Parameters:
     - unknown   (pandas.DataFrame): DataFrame of questioned (disputed) documents.
@@ -292,6 +362,7 @@ def lambdaG_v2(unknown, known, refs=None, metadata=None, N=10, r=30, cores=1, ve
     - r         (int, optional): Number of iterations/bootstrap samples. Default is 30.
     - cores     (int, optional): Number of CPU cores for parallel processing. Default is 1.
     - vectorise (bool, optional): If True, splits documents into sentences before feature extraction. Default is False.
+    - embed     (bool, optional): If True, embeds the dataframes prior to completing. Default is False.
 
     Returns:
     - pandas.DataFrame: Uncalibrated log-likelihood ratios (LambdaG) for each document in `unknown`.
@@ -330,26 +401,69 @@ def lambdaG_v2(unknown, known, refs=None, metadata=None, N=10, r=30, cores=1, ve
             raise ValueError(
                 f"Not enough reference sentences ({len(refs_filtered)}) to sample {num_known_sentences}"
             )
-        
-        # turn the Series into a list first
-        all_refs = refs_filtered['tokens'].tolist()
 
-        # Build the candidate model
-        k_model = build_kn_model(known_sentences, N)
-        # Precompute known vs unknown log-probs
-        known_logps = [sentence_log10_prob(k_model, sent, N) for sent in unknown_sentences]
+        known_counts = extract_ngrams(known_sentences, N)
 
-        lambda_score = 0
-        
-        for _ in range(r):
-            ref_sentences = random.sample(all_refs, num_known_sentences)
+        known_probs = []
+        for q in unknown_sentences:
+            ps = sentence_prob(q, known_counts, D=0.75, N=N)
+            # replace zeros
+            ps = [p if p > 0 else sys.float_info.min for p in ps]
+            known_probs.append(ps)
 
-            ref_model = build_kn_model(ref_sentences, N)
-            ref_logps = [sentence_log10_prob(ref_model, sent, N) for sent in unknown_sentences]
+        # ----------
+        # NOTE - New element of getting max similarity sentence for each in the known
+        # Build neighbor lists: list of (text, tokens) per known sentence
+        refs_emb_df = refs_filtered[['text', 'tokens', 'embedding']].reset_index(drop=True)
+        neighbor_lists = []
+        for emb in known_filtered['embedding']:
+            top_df = get_top_n_closest(refs_emb_df, emb, embedding_column='embedding', top_n=r)
+            # store pairs of (text, tokens)
+            neighbor_lists.append(list(zip(top_df['text'], top_df['tokens'])))
 
-            # Sum per-sentence log-LR
-            lr = sum(k - r_ for k, r_ in zip(known_logps, ref_logps))
-            lambda_score += lr / r
+        # Generate r bootstrap samples ensuring no duplicate texts within each sample
+        max_attempts = 100
+        sample_sets = []
+        for sample_idx in range(r):
+            success = False
+            for attempt in range(max_attempts):
+                sample_tokens = []
+                chosen_texts = set()
+                # Shuffle neighbor lists to randomize selection
+                shuffled_lists = [random.sample(nbrs, len(nbrs)) for nbrs in neighbor_lists]
+                for nbrs in shuffled_lists:
+                    # pick first (text, tokens) whose text not yet chosen
+                    for text, tokens in nbrs:
+                        if text not in chosen_texts:
+                            sample_tokens.append(tokens)
+                            chosen_texts.add(text)
+                            break
+                    else:
+                        # this shuffled attempt failed, break to retry
+                        break
+                if len(sample_tokens) == len(neighbor_lists):
+                    sample_sets.append(sample_tokens)
+                    success = True
+                    break
+            if not success:
+                raise ValueError(f"Could not generate sample {sample_idx+1} without duplicate texts after {max_attempts} attempts")
+        # ----------
+
+        # Compute LambdaG using these sample sets
+        lambda_score = 0.0
+        for current_refs in sample_sets:
+            ref_counts = extract_ngrams(current_refs, N)
+            ref_probs = []
+            for q in unknown_sentences:
+                ps = sentence_prob(q, ref_counts, D=0.75, N=N)
+                ps = [p if p > 0 else sys.float_info.min for p in ps]
+                ref_probs.append(ps)
+
+            lr_sum = 0.0
+            for kp, rp in zip(known_probs, ref_probs):
+                for k_val, r_val in zip(kp, rp):
+                    lr_sum += math.log10(k_val / r_val)
+            lambda_score += lr_sum / r
 
         results.append({
             'problem': problem,
@@ -358,8 +472,9 @@ def lambdaG_v2(unknown, known, refs=None, metadata=None, N=10, r=30, cores=1, ve
             'target': target,
             'score': lambda_score
         })
-        
+
     return pd.DataFrame(results)
+    
 
 def lambdaG_paraphrase(unknown, known, refs=None, metadata=None,
                        impostor_loc=None, N=10, r=30, cores=1, vectorise=False):
@@ -437,7 +552,7 @@ def lambdaG_paraphrase(unknown, known, refs=None, metadata=None,
         known_sentences = known_filtered['tokens']
         unknown_sentences = unknown_filtered['tokens']
 
-        num_known_sentences = len(known_sentences)
+        num_known_sentences = len(known_sentences)        
         num_unknown_sentences = len(unknown_sentences)
 
         if num_known_sentences > len(refs_filtered):
@@ -445,10 +560,11 @@ def lambdaG_paraphrase(unknown, known, refs=None, metadata=None,
                 f"Not enough reference sentences ({len(refs_filtered)}) to sample {num_known_sentences}"
             )
 
-        known_counts = extract_ngrams(known_sentences, N)
+        # known_counts = extract_ngrams(known_sentences, N)
+        known_counts = extract_ngrams(unknown_sentences, N)
 
         known_probs = []
-        for q in unknown_sentences:
+        for q in known_sentences:
             ps = sentence_prob(q, known_counts, D=0.75, N=N)
             # replace zeros
             ps = [p if p > 0 else sys.float_info.min for p in ps]
@@ -469,16 +585,17 @@ def lambdaG_paraphrase(unknown, known, refs=None, metadata=None,
             if not ref_sentences:
                 print(f"Warning: No sentences found for impostor {impostor_id}, skipping.")
                 continue
-        
+            
             ref_counts = extract_ngrams(ref_sentences, N)
         
             ref_probs = []
-            for q in unknown_sentences:
+            for q in known_sentences:
                 ps = sentence_prob(q, ref_counts, D=0.75, N=N)
                 ps = [p if p > 0 else sys.float_info.min for p in ps]
                 ref_probs.append(ps)
         
             lr_sum = 0.0
+            
             for kp_sent, rp_sent in zip(known_probs, ref_probs):
                 assert len(kp_sent) == len(rp_sent)
                 for k, r_ in zip(kp_sent, rp_sent):
@@ -588,6 +705,89 @@ def lambdaG_perplexity(unknown, known, refs, metadata=None, N=10, r=30, cores=1,
             'unknown_author': unknown_author,
             'target': target,
             'score': doc_score
+        })
+        
+    return pd.DataFrame(results)
+
+def lambdaG_v2(unknown, known, refs=None, metadata=None, N=10, r=30, cores=1, vectorise=False):
+    """
+    Run the LambdaG author‐verification method.
+    NOTE - TAKES A LOT LONGER TO RUN THAN ORIGINAL METHOD
+
+    Parameters:
+    - unknown   (pandas.DataFrame): DataFrame of questioned (disputed) documents.
+    - known     (pandas.DataFrame): DataFrame of known (undisputed) documents.
+    - refs      (pandas.DataFrame, optional): Reference corpus for calibration. This can be the same as known.
+    - metadata  (pandas.DataFrame, optional): A dataframe of problem metadata, used if known contains more than one author.
+    - N         (int, optional): Order of the model (n-gram length). Default is 10.
+    - r         (int, optional): Number of iterations/bootstrap samples. Default is 30.
+    - cores     (int, optional): Number of CPU cores for parallel processing. Default is 1.
+    - vectorise (bool, optional): If True, splits documents into sentences before feature extraction. Default is False.
+
+    Returns:
+    - pandas.DataFrame: Uncalibrated log-likelihood ratios (LambdaG) for each document in `unknown`.
+    """
+
+    problem_df = problem_data_prep(unknown, known, metadata)
+
+    if vectorise:
+        print("Vectorising data into sentences")
+        # NOTE - Need to add in vetorising method
+        
+    total = len(problem_df)
+    results = []
+    for idx, row in problem_df.iterrows():
+        known_author = row['known_author']
+        unknown_author = row['unknown_author']
+        problem = row['problem']
+        target = known_author == unknown_author
+        
+        print(f"        Working on problem {idx+1} of {total}: {problem}")
+
+        # Filter the known and unknown for the current problem
+        known_filtered = known[known['author'] == known_author]
+        unknown_filtered = unknown[unknown['author'] == unknown_author]
+
+        # Filter the reference dataset
+        refs_filtered = refs[~refs['author'].isin([known_author, unknown_author])]
+
+        known_sentences = known_filtered['tokens']
+        unknown_sentences = unknown_filtered['tokens']
+
+        num_known_sentences = len(known_sentences)
+        num_unknown_sentences = len(unknown_sentences)
+
+        if num_known_sentences > len(refs_filtered):
+            raise ValueError(
+                f"Not enough reference sentences ({len(refs_filtered)}) to sample {num_known_sentences}"
+            )
+        
+        # turn the Series into a list first
+        all_refs = refs_filtered['tokens'].tolist()
+
+        # Build the candidate model
+        k_model = build_kn_model(known_sentences, N)
+        # Precompute known vs unknown log-probs
+        known_logps = [sentence_log10_prob(k_model, sent, N) for sent in unknown_sentences]
+
+        lambda_score = 0
+        
+        for _ in range(r):
+            ref_sentences = random.sample(all_refs, num_known_sentences)
+
+            ref_model = build_kn_model(ref_sentences, N)
+            ref_logps = [sentence_log10_prob(ref_model, sent, N) for sent in unknown_sentences]
+
+            # Sum per-sentence log-LR
+            lr = sum(k - r_ for k, r_ in zip(known_logps, ref_logps))
+            lambda_score += lr / r
+
+        results.append({
+            'problem': problem,
+            'known_author': known_author,
+            'unknown_author': unknown_author,
+            'target': target,
+            'score': lambda_score
         })
         
     return pd.DataFrame(results)
