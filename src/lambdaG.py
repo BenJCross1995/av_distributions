@@ -518,7 +518,6 @@ def lambdaG_paraphrase(unknown, known, refs=None, metadata=None,
         unknown_filtered = unknown[unknown['author'] == unknown_author]
         known_docs = known_filtered['doc_id'].unique().tolist()
 
-        # NOTE - NEED TO ACCOUNT FOR NOT ALL KNOWN DOCS BEING IN IMPOSTOR LOC
         # Filter the reference dataset
         if refs is not None and not refs.empty:
             refs_filtered = refs[refs['doc_id'].isin(known_docs)]

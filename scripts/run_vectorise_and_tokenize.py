@@ -4,34 +4,37 @@ import argparse
 import torch
 from pathlib import Path
 
+import nltk
+nltk.download('punkt_tab', quiet=True)
+    
 # Ensure we can import from src/
 sys.path.append(os.path.abspath(os.path.join(__file__, "..", "..", "src")))
 
 from read_and_write_docs import read_jsonl, write_jsonl
 from preprocessing import vectorize_df
-from tokenize import score_dataframe
+from tokenize_and_score import score_dataframe
 
 def parse_args():
     p = argparse.ArgumentParser(
         description="Score a single JSONL file with token-level log-probs"
     )
     p.add_argument(
-        "--input-file",
+        "--input_file",
         required=True,
         help="Path to the input .jsonl file",
     )
     p.add_argument(
-        "--output-file",
+        "--output_file",
         required=True,
         help="Path where the scored .jsonl should be written",
     )
     p.add_argument(
-        "--model-loc",
+        "--model_loc",
         required=True,
         help="Local path or HuggingFace ID for the causal LM",
     )
     p.add_argument(
-        "--num-threads",
+        "--num_threads",
         type=int,
         default=None,
         help="Number of CPU threads to use (defaults to PyTorch’s choice)",
@@ -61,7 +64,7 @@ def main():
     # 1) Read & normalize
     df = read_jsonl(str(in_path))
     df['impostor_id'] = df.index + 1
-    df = df[['doc_id', 'corpus', 'impostor_id', 'author', 'texttype', 'rephrased']]
+    df = df[['doc_id', 'corpus', 'impostor_id', 'author', 'texttype', 'rephrased', 'parascore_free']]
     df = df.rename(columns={'rephrased': 'text'})
 
     # 2) Vectorize

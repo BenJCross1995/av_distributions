@@ -182,7 +182,7 @@ def performance(
         'Mean_TRUE_LLR': mean_true_llr,
         'Mean_FALSE_LLR': mean_false_llr,
         'TRUE_trials': true_trials,
-        'FALSE_trials': false_trials
+        'FALSE_trials': false_trials,
         'AUC': auc_val,
         'Balanced_Accuracy': bal_acc,
         'Precision': precision,
