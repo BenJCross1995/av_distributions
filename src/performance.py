@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import StandardScaler # NEW
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     roc_auc_score,
@@ -11,6 +12,7 @@ from sklearn.metrics import (
     roc_curve
 )
 from sklearn.model_selection import LeaveOneOut
+
 
 # -----------------------------------------------------------------------------
 # Core metric functions
@@ -192,5 +194,124 @@ def performance(
         'TN': tn,
     }
     results = {**metadata, **metrics}
-    
+    return pd.DataFrame([results])
+
+def performance_paraphrase(
+    df_train: pd.DataFrame,
+    score_col: str,
+    target_col: str,
+    df_test: pd.DataFrame = None,
+    additional_metadata: dict = None,
+    keep_cols: list = None
+) -> pd.DataFrame:
+    """
+    Variant of `performance` that standardizes raw scores before logistic calibration.
+
+    Parameters:
+    - df_train: training DataFrame
+    - score_col: name of column containing raw system scores (e.g., log-likelihood ratios)
+    - target_col: column name for binary labels (1=target, 0=non-target)
+    - df_test: optional test DataFrame; if None, uses Leave-One-Out CV on df_train
+    - additional_metadata: dict of static metadata fields to include
+    - keep_cols: list of DataFrame columns to carry through as metadata
+
+    Returns:
+    - DataFrame with one row of metrics plus metadata
+    """
+    # Prepare metadata
+    metadata = {} if additional_metadata is None else dict(additional_metadata)
+    if keep_cols:
+        for col in keep_cols:
+            if col not in df_train.columns:
+                raise KeyError(f"Column '{col}' not found in df_train")
+            unique_vals = df_train[col].unique()
+            if len(unique_vals) != 1:
+                raise ValueError(
+                    f"Column '{col}' must have a single unique value to use as metadata; found: {unique_vals}"
+                )
+            metadata[col] = unique_vals[0]
+
+    # Extract and standardize scores
+    scaler = StandardScaler()
+    scores_train = df_train[[score_col]].values.astype(float)
+    scores_train_std = scaler.fit_transform(scores_train)
+
+    # Decide between LOO CV or train/test
+    if df_test is None:
+        loo = LeaveOneOut()
+        probs, truths = [], []
+        for train_idx, test_idx in loo.split(df_train):
+            X_tr = scores_train_std[train_idx]
+            y_tr = df_train[target_col].iloc[train_idx]
+            X_te = scores_train_std[test_idx]
+
+            # Fit unregularized logistic
+            model = LogisticRegression(penalty=None, solver='lbfgs', max_iter=10000)
+            model.fit(X_tr, y_tr)
+
+            # Predict probability for the single test sample
+            p = model.predict_proba(X_te)[:, 1][0]
+            probs.append(p)
+
+            # Extract the true label as a scalar
+            true_label = df_train[target_col].iloc[test_idx[0]]
+            truths.append(bool(true_label))
+
+        pred_probs = np.array(probs)
+        y_true = np.array(truths)
+        pred_llrs = np.log10(pred_probs / (1 - pred_probs))
+    else:
+        # Standardize both train and test using train statistics
+        scores_test = df_test[[score_col]].values.astype(float)
+        scores_test_std = scaler.transform(scores_test)
+
+        # Fit unregularized logistic
+        model = LogisticRegression(penalty=None, solver='lbfgs', max_iter=10000)
+        model.fit(scores_train_std, df_train[target_col])
+
+        # Predict on test set
+        pred_probs = model.predict_proba(scores_test_std)[:, 1]
+        y_true = df_test[target_col].to_numpy()
+        pred_llrs = np.log10(pred_probs / (1 - pred_probs))
+
+    # Compute metrics (reuse your existing functions)
+    cllr = compute_cllr(pred_probs, y_true)
+    cllr_min = compute_cllr_min(pred_probs, y_true)
+    eer = compute_eer(pred_probs, y_true)
+    auc_val = float(roc_auc_score(y_true, pred_probs))
+
+    # Classify at LLR=0 threshold
+    y_pred = pred_llrs > 0
+    bal_acc = float(balanced_accuracy_score(y_true, y_pred))
+    precision = float(precision_score(y_true, y_pred))
+    recall = float(recall_score(y_true, y_pred))
+    f1 = float(f1_score(y_true, y_pred))
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+
+    # Log-likelihood stats
+    mean_true_llr = float(np.mean(pred_llrs[y_true]))
+    mean_false_llr = float(np.mean(pred_llrs[~y_true]))
+    true_trials = int(np.sum(y_true))
+    false_trials = int(len(y_true) - true_trials)
+
+    # Compile results
+    metrics = {
+        'Cllr': cllr,
+        'Cllr_min': cllr_min,
+        'EER': eer,
+        'Mean_TRUE_LLR': mean_true_llr,
+        'Mean_FALSE_LLR': mean_false_llr,
+        'TRUE_trials': true_trials,
+        'FALSE_trials': false_trials
+        'AUC': auc_val,
+        'Balanced_Accuracy': bal_acc,
+        'Precision': precision,
+        'Recall': recall,
+        'F1': f1,
+        'TP': tp,
+        'FP': fp,
+        'FN': fn,
+        'TN': tn,
+    }
+    results = {**metadata, **metrics}
     return pd.DataFrame([results])
