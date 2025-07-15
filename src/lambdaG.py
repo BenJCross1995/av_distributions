@@ -709,16 +709,18 @@ def lambdaG_perplexity(unknown, known, refs, metadata=None, N=10, r=30, cores=1,
         
     return pd.DataFrame(results)
 
-def lambdaG_v2(unknown, known, refs=None, metadata=None, N=10, r=30, cores=1, vectorise=False):
+def lambdaG_paraphrase(unknown, known, refs=None, metadata=None,
+                       impostor_loc=None, N=10, r=30, cores=1, vectorise=False):
     """
     Run the LambdaG author‐verification method.
-    NOTE - TAKES A LOT LONGER TO RUN THAN ORIGINAL METHOD
 
     Parameters:
     - unknown   (pandas.DataFrame): DataFrame of questioned (disputed) documents.
     - known     (pandas.DataFrame): DataFrame of known (undisputed) documents.
     - refs      (pandas.DataFrame, optional): Reference corpus for calibration. This can be the same as known.
     - metadata  (pandas.DataFrame, optional): A dataframe of problem metadata, used if known contains more than one author.
+    - impostor_loc (str, optional): The directory where the impostors are stored for paraphrase version of function.
+
     - N         (int, optional): Order of the model (n-gram length). Default is 10.
     - r         (int, optional): Number of iterations/bootstrap samples. Default is 30.
     - cores     (int, optional): Number of CPU cores for parallel processing. Default is 1.
@@ -747,40 +749,88 @@ def lambdaG_v2(unknown, known, refs=None, metadata=None, N=10, r=30, cores=1, ve
         # Filter the known and unknown for the current problem
         known_filtered = known[known['author'] == known_author]
         unknown_filtered = unknown[unknown['author'] == unknown_author]
+        known_docs = known_filtered['doc_id'].unique().tolist()
 
+        # NOTE - NEED TO ACCOUNT FOR NOT ALL KNOWN DOCS BEING IN IMPOSTOR LOC
         # Filter the reference dataset
-        refs_filtered = refs[~refs['author'].isin([known_author, unknown_author])]
+        if refs is not None and not refs.empty:
+            refs_filtered = refs[refs['doc_id'].isin(known_docs)]
+            print(f"Original refs count: {refs.shape[0]}")
+        elif impostor_loc:
+            ref_list = []
+            for doc in known_docs:
+                file_path = f"{impostor_loc}/{doc}.jsonl"
+                try:
+                    ref_df = read_jsonl(file_path)
+                    ref_list.append(ref_df)
+                except FileNotFoundError:
+                    print(f"File not found, skipping: {file_path}")
+            if ref_list:
+                refs_filtered = pd.concat(ref_list, ignore_index=True)
+            else:
+                raise ValueError("No reference files were found in the impostor location.")
+        else:
+            raise ValueError("No `refs` provided and no `impostor_loc` set.")
+
+        # Validate that all known_docs are in refs_filtered
+        available_docs = refs_filtered['doc_id'].unique().tolist()
+        missing_docs = [doc for doc in known_docs if doc not in available_docs]
+        
+        if missing_docs:
+            print(f"{len(missing_docs)} known_docs are missing from refs_filtered and will be skipped: {missing_docs}")
+            # Filter out missing docs from known
+            known_docs = [doc for doc in known_docs if doc in available_docs]
+            known_filtered = known_filtered[known_filtered['doc_id'].isin(known_docs)]
 
         known_sentences = known_filtered['tokens']
         unknown_sentences = unknown_filtered['tokens']
 
-        num_known_sentences = len(known_sentences)
+        num_known_sentences = len(known_sentences)        
         num_unknown_sentences = len(unknown_sentences)
 
         if num_known_sentences > len(refs_filtered):
             raise ValueError(
                 f"Not enough reference sentences ({len(refs_filtered)}) to sample {num_known_sentences}"
             )
-        
-        # turn the Series into a list first
-        all_refs = refs_filtered['tokens'].tolist()
 
-        # Build the candidate model
-        k_model = build_kn_model(known_sentences, N)
-        # Precompute known vs unknown log-probs
-        known_logps = [sentence_log10_prob(k_model, sent, N) for sent in unknown_sentences]
+        # known_counts = extract_ngrams(known_sentences, N)
+        known_counts = extract_ngrams(known_sentences, N)
+
+        known_probs = []
+        for q in unknown_sentences:
+            ps = sentence_prob(q, known_counts, D=0.75, N=N)
+            # replace zeros
+            ps = [p if p > 0 else sys.float_info.min for p in ps]
+            known_probs.append(ps)
+
+        # Generate a list of samples of length r
+        all_impostors = refs_filtered['impostor_id'].unique().tolist()
+        impostor_samples = random.sample(all_impostors, r)
+
+        all_refs = refs_filtered['tokens'].tolist()
 
         lambda_score = 0
         
         for _ in range(r):
             ref_sentences = random.sample(all_refs, num_known_sentences)
 
-            ref_model = build_kn_model(ref_sentences, N)
-            ref_logps = [sentence_log10_prob(ref_model, sent, N) for sent in unknown_sentences]
+            ref_counts = extract_ngrams(ref_sentences, N)
+            
+            ref_probs = []
+            for q in unknown_sentences:
+                ps = sentence_prob(q, ref_counts, D=0.75, N=N)
+                # replace zeros
+                ps = [p if p > 0 else sys.float_info.min for p in ps]
+                ref_probs.append(ps)
 
-            # Sum per-sentence log-LR
-            lr = sum(k - r_ for k, r_ in zip(known_logps, ref_logps))
-            lambda_score += lr / r
+            lr_sum = 0.0
+            for kp_sent, rp_sent in zip(known_probs, ref_probs):
+                assert len(kp_sent) == len(rp_sent)
+                for k, r_ in zip(kp_sent, rp_sent):
+                    lr_sum += math.log10(k / r_)
+        
+            # 4. update lambda
+            lambda_score += lr_sum / r
 
         results.append({
             'problem': problem,
