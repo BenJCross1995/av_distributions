@@ -518,6 +518,7 @@ def lambdaG_paraphrase(unknown, known, refs=None, metadata=None,
         unknown_filtered = unknown[unknown['author'] == unknown_author]
         known_docs = known_filtered['doc_id'].unique().tolist()
 
+        # NOTE - NEED TO ACCOUNT FOR NOT ALL KNOWN DOCS BEING IN IMPOSTOR LOC
         # Filter the reference dataset
         if refs is not None and not refs.empty:
             refs_filtered = refs[refs['doc_id'].isin(known_docs)]
@@ -560,10 +561,10 @@ def lambdaG_paraphrase(unknown, known, refs=None, metadata=None,
             )
 
         # known_counts = extract_ngrams(known_sentences, N)
-        known_counts = extract_ngrams(unknown_sentences, N)
+        known_counts = extract_ngrams(known_sentences, N)
 
         known_probs = []
-        for q in known_sentences:
+        for q in unknown_sentences:
             ps = sentence_prob(q, known_counts, D=0.75, N=N)
             # replace zeros
             ps = [p if p > 0 else sys.float_info.min for p in ps]
@@ -588,7 +589,7 @@ def lambdaG_paraphrase(unknown, known, refs=None, metadata=None,
             ref_counts = extract_ngrams(ref_sentences, N)
         
             ref_probs = []
-            for q in known_sentences:
+            for q in unknown_sentences:
                 ps = sentence_prob(q, ref_counts, D=0.75, N=N)
                 ps = [p if p > 0 else sys.float_info.min for p in ps]
                 ref_probs.append(ps)
@@ -708,7 +709,7 @@ def lambdaG_perplexity(unknown, known, refs, metadata=None, N=10, r=30, cores=1,
         
     return pd.DataFrame(results)
 
-def lambdaG_paraphrase(unknown, known, refs=None, metadata=None,
+def lambdaG_paraphrase_v2(unknown, known, refs=None, metadata=None,
                        impostor_loc=None, N=10, r=30, cores=1, vectorise=False):
     """
     Run the LambdaG author‐verification method.
