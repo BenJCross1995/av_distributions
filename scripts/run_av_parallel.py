@@ -13,7 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(__file__, "..", "..", "src")))
 
 from read_and_write_docs import read_jsonl, write_jsonl, read_rds
 from utils import apply_temp_doc_id, build_metadata_df
-from lambdaG import lambdaG, lambdaG_paraphrase, lambdaG_perplexity
+from lambdaG import lambdaG, lambdaG_paraphrase, lambdaG_perplexity, lambdaG_jsd, lambdaG_renyi, lambdaG_entropy_weighted, lambdaG_surprisal, lambdaG_hellinger
 
 # Store all AV methods in the following registry allows us to load models from other modules
 # in a single, unified way.
@@ -21,6 +21,11 @@ _METHOD_REGISTRY = {
     'lambdaG': lambdaG,
     'lambdaG_paraphrase': lambdaG_paraphrase,
     'lambdaG_max_perplexity': lambdaG_perplexity,
+    'lambdaG_jsd': lambdaG_jsd,
+    'lambdaG_renyi': lambdaG_renyi,
+    'lambdaG_entropy': lambdaG_entropy_weighted,
+    'lambdaG_surprisal': lambdaG_surprisal,
+    'lambdaG_hellinger': lambdaG_hellinger
 }
 
 def parse_args():
