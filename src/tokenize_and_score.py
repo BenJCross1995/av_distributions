@@ -1,5 +1,3 @@
-import os
-from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -56,52 +54,6 @@ def compute_log_probs_with_median(text: str, tokenizer, model):
 def compute_perplexity(logprobs):
     """Sentence perplexity from natural‐log token log-probs."""
     return float(np.exp(-np.mean(logprobs)))
-
-def score_dataframe_orig(df: pd.DataFrame, text_column: str = "text") -> pd.DataFrame:
-    """
-    Takes a dataframe with a column of texts and computes:
-    - list of log-probs per token
-    - median log-probs per token
-    - number of tokens
-    - sum of log probs
-    - average log-prob
-    - differences between log_probs and median log-probs
-    - absolute differences between log_probs and median log-probs
-    - mean of differences
-    - mean of absolute differences
-    """
-    tqdm.pandas(desc="Scoring texts")
-    df = df.copy()
-
-    # Step 1: Extract tokens, log_probs, and median log_probs
-    df[['tokens', 'log_probs', 'med_log_prob']] = df[text_column].progress_apply(
-        lambda t: pd.Series(compute_log_probs_with_median(t))
-    )
-
-    # Step 2: Compute differences
-    df['differences'] = df.apply(
-        lambda row: [lp - mlp for lp, mlp in zip(row['log_probs'], row['med_log_prob'])],
-        axis=1
-    )
-
-    # Compute absolute differences
-    df['abs_differences'] = df.apply(
-        lambda row: [abs(lp - mlp) for lp, mlp in zip(row['log_probs'], row['med_log_prob'])],
-        axis=1
-    )
-
-    # Compute summary stats
-    df["num_tokens"] = df["log_probs"].apply(len)
-    df["sum_log_prob"] = df["log_probs"].apply(sum)
-    df["avg_log_prob"] = df["sum_log_prob"] / df["num_tokens"]
-
-    # Compute mean of differences and absolute differences
-    df["mean_diff"] = df["differences"].apply(np.mean)
-    df["mean_abs_diff"] = df["abs_differences"].apply(np.mean)
-
-    df['perplexity'] = df['log_probs'].apply(compute_perplexity)
-
-    return df
 
 def score_dataframe(
     df: pd.DataFrame,

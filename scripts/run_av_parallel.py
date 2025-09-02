@@ -125,6 +125,16 @@ def single_run(rep_id, args, known, unknown, agg_metadata):
 
 def main():
     args = parse_args()
+
+    # Check if save_loc already exists
+    if os.path.exists(args.save_loc):
+        print(f"Save location '{args.save_loc}' already exists. Skipping execution.")
+        sys.exit(0)
+
+    # Ensure output directory exists
+    save_dir = os.path.dirname(args.save_loc) or '.'
+    os.makedirs(save_dir, exist_ok=True)
+    
     start = time.time()
 
     known, unknown, agg_metadata = load_and_prep(args)
