@@ -13,7 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(__file__, "..", "..", "src")))
 
 from read_and_write_docs import read_jsonl, write_jsonl, read_rds
 from utils import apply_temp_doc_id, build_metadata_df
-from lambdaG import lambdaG, lambdaG_paraphrase, lambdaG_perplexity
+from lambdaG import lambdaG, lambdaG_paraphrase, lambdaG_perplexity, lambdaG_jsd, lambdaG_renyi, lambdaG_entropy_weighted, lambdaG_surprisal, lambdaG_hellinger
 
 # Store all AV methods in the following registry allows us to load models from other modules
 # in a single, unified way.
@@ -21,6 +21,11 @@ _METHOD_REGISTRY = {
     'lambdaG': lambdaG,
     'lambdaG_paraphrase': lambdaG_paraphrase,
     'lambdaG_max_perplexity': lambdaG_perplexity,
+    'lambdaG_jsd': lambdaG_jsd,
+    'lambdaG_renyi': lambdaG_renyi,
+    'lambdaG_entropy': lambdaG_entropy_weighted,
+    'lambdaG_surprisal': lambdaG_surprisal,
+    'lambdaG_hellinger': lambdaG_hellinger
 }
 
 def parse_args():
@@ -120,6 +125,16 @@ def single_run(rep_id, args, known, unknown, agg_metadata):
 
 def main():
     args = parse_args()
+
+    # Check if save_loc already exists
+    if os.path.exists(args.save_loc):
+        print(f"Save location '{args.save_loc}' already exists. Skipping execution.")
+        sys.exit(0)
+
+    # Ensure output directory exists
+    save_dir = os.path.dirname(args.save_loc) or '.'
+    os.makedirs(save_dir, exist_ok=True)
+    
     start = time.time()
 
     known, unknown, agg_metadata = load_and_prep(args)

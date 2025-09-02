@@ -1,6 +1,8 @@
 import re
 import pandas as pd
 
+from itertools import product
+
 def create_temp_doc_id(input_text):
     """Create a new doc id by preprocessing the current id"""
     
@@ -89,3 +91,68 @@ def build_metadata_df(filtered_metadata: pd.DataFrame,
     exploded.insert(0, 'sample_id', range(1, len(exploded) + 1))
 
     return exploded
+
+def problem_data_prep(
+    unknown: pd.DataFrame,
+    known: pd.DataFrame,
+    metadata: pd.DataFrame = None
+) -> pd.DataFrame:
+    """
+    Build a DataFrame of (known vs. unknown) author pairs for LambdaG.
+
+    If `metadata` is provided, it must contain columns
+    `'problem'`, `'known_author'` and `'unknown_author'`, and only rows
+    where both authors appear in `known['author']` and
+    `unknown['author']` are kept.
+
+    Otherwise, if exactly one known author exists, all pairings
+    with each unknown author are generated and a `problem` column
+    is added by concatenating "known_author vs unknown_author".
+
+    Parameters:
+    - unknown (pandas.DataFrame): DataFrame of questioned (disputed) documents.
+    - known   (pandas.DataFrame): DataFrame of known (undisputed) documents.
+    - refs    (pandas.DataFrame): DataFrame of reference documents, can be the same as known.
+
+    Returns:
+    - pandas.DataFrame: A dataframe of possible samples for the LambdaG method
+    """
+    known_authors   = known['author'].unique().tolist()
+    unknown_authors = unknown['author'].unique().tolist()
+
+    # Use metadata if available
+    if metadata is not None and not metadata.empty:
+        problem_df = (
+            metadata.loc[
+                metadata['known_author'].isin(known_authors) &
+                metadata['unknown_author'].isin(unknown_authors),
+                ['problem','known_author','unknown_author']
+            ]
+            .drop_duplicates()
+            .reset_index(drop=True)
+        )
+
+    # If multiple known authors but no metadata, that's ambiguous
+    elif len(known_authors) > 1:
+        raise ValueError(
+            f"There are {len(known_authors)} known authors but no metadata provided"
+        )
+
+    # Single known author: generate all vs. unknown
+    elif len(known_authors) == 1 and unknown_authors:
+        pairs = [
+            (k, u)
+            for k, u in product(known_authors, unknown_authors)
+        ]
+        problem_df = pd.DataFrame(pairs, columns=['known_author', 'unknown_author'])
+        problem_df.insert(
+            loc=0,
+            column='problem',
+            value=problem_df['known_author'] + ' vs ' + problem_df['unknown_author']
+        )
+
+    else:
+        raise ValueError("No valid author pairs could be generated")
+
+    print(f"    There are {len(known_authors)} known author(s) and {len(problem_df)} problem(s) in the dataset.")
+    return problem_df

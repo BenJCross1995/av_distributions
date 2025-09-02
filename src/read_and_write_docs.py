@@ -6,6 +6,8 @@ import pyreadr
 import pandas as pd
 
 from datetime import datetime
+from pathlib import Path
+from typing import Union
 
 def read_jsonl(file_path):
     """Reads a JSONL file and converts it into a pandas DataFrame."""
@@ -30,6 +32,14 @@ def read_rds(file_path):
 
     # Otherwise, return the whole dict (could be multiple data frames, models, etc.)
     return dict(objects)
+
+def read_xml(location: Union[str, Path]) -> str:
+    """Reads an XML file and stores as string"""
+    path = Path(location)
+    if not path.is_file():
+        raise FileNotFoundError(f"No such file: {path}")
+    # Read and return the file contents as a single string
+    return path.read_text(encoding='utf-8')
 
 def write_jsonl(data, output_file_path):
     """Writes a pandas DataFrame to a JSONL file."""
