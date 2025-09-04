@@ -101,23 +101,32 @@ def common_ngrams(
 
     return common
 
+from typing import Any, Dict, List, Set, Tuple, Union
+
 def pretty_print_common_ngrams(
     common: Dict[int, Set[Tuple[Any, ...]]],
     sep: str = " ",
-    order: str = "count_desc",  # "count_desc" | "len_asc" | "len_desc"
-    tokenizer=None,             # Optional HuggingFace tokenizer
-) -> None:
+    order: str = "count_desc",      # "count_desc" | "len_asc" | "len_desc"
+    tokenizer=None,                 # Optional HuggingFace tokenizer
+    return_format: str = "print",   # "print" | "flat" | "grouped"
+) -> Union[None, List[str], Dict[int, List[str]]]:
     """
-    Pretty-print shared n-grams.
+    Pretty-print or return shared n-grams.
 
     - Groups by n (the integer length).
     - If `tokenizer` is None: converts each n-gram tuple into a string joined by `sep` (original behavior).
     - If `tokenizer` is provided: decodes token ids/strings to readable text (special tokens removed).
-    - Prints lists, ordered by the number of n-grams per length (descending) by default.
+    - `order` controls group ordering (and the flattening order for "flat").
+    - `return_format`:
+        * "print"   -> prints grouped output and returns None (default; original behavior).
+        * "flat"    -> returns a single flattened list of strings across all n values, ordered by `order`.
+        * "grouped" -> returns a dict[int, list[str]] of strings per n (keys are the n values).
     """
     if not common:
-        print("{}")
-        return
+        if return_format == "print":
+            print("{}")
+            return None
+        return [] if return_format == "flat" else {}
 
     def stringify_ngram(ngram: Tuple[Any, ...]) -> str:
         # Original behavior (no tokenizer): join items with sep
@@ -165,11 +174,24 @@ def pretty_print_common_ngrams(
     elif order == "len_desc":
         items = sorted(grouped.items(), key=lambda kv: -kv[0])
     else:
+        # Fallback to default
         items = sorted(grouped.items(), key=lambda kv: (-len(kv[1]), kv[0]))
 
-    # Print: e.g., "3-grams (5): ['a b c', 'd e f', ...]"
+    if return_format == "flat":
+        # Flatten respecting the chosen group order and per-group alpha sorting
+        flat: List[str] = [s for _, strings in items for s in strings]
+        return flat
+
+    if return_format == "grouped":
+        # Return the grouped mapping (unordered by default dict semantics).
+        # If you want the ordering preserved, convert `items` to an OrderedDict externally.
+        return grouped
+
+    # Default: print grouped nicely and return None
     for n, strings in items:
         print(f"{n}-grams ({len(strings)}): {strings}")
+    return None
+
         
 def highest_common(common: Dict[int, Set[Tuple[Any, ...]]]) -> Tuple[int, Set[Tuple[Any, ...]]]:
     """
