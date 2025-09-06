@@ -1,13 +1,12 @@
-import os
 import sys
 import argparse
 import time
 
-import numpy as np
 import pandas as pd
+from from_root import from_root
 
 # Ensure we can import from src/
-sys.path.append(os.path.abspath(os.path.join(__file__, "..", "..", "src")))
+sys.path.insert(0, str(from_root("src")))
 
 from read_and_write_docs import read_jsonl, write_jsonl, read_rds
 from utils import apply_temp_doc_id, build_metadata_df
