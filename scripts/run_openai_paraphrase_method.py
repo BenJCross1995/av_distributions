@@ -4,6 +4,7 @@ import argparse
 import sys
 import json
 import re
+import os
 from from_root import from_root
 
 import pandas as pd
@@ -110,10 +111,20 @@ def main():
     
     args=parse_args()
     
+    # Ensure the directory exists before beginning
+    os.mkdir(args.save_loc, exist_ok=True)
+    
     # -----
     # LOAD DATA & LOCAL MODEL
     # -----
     specific_problem = f"{args.known_doc} vs {args.unknown_doc}"
+    save_loc = f"{args.save_loc}/{specific_problem}.xlsx"
+    
+    # Skip the problem if already exists
+    if os.path.exists(save_loc):
+        print(f"Path {save_loc} already exists. Exiting.")
+        sys.exit()
+    
     print(f"Working on problem: {specific_problem}")
     
     print("Loading model")
@@ -162,6 +173,7 @@ def main():
     print("Getting common n-grams")
     common = common_ngrams(known_text, unknown_text, args.ngram_n, model, tokenizer, lowercase=args.lowercase)
     n_gram_list = pretty_print_common_ngrams(common, tokenizer=tokenizer, order=args.order, return_format='flat')
+    print(f"There are {len(n_gram_list)} n-grams in common!")
     
     # -----
     # OpenAI bits
@@ -209,9 +221,7 @@ def main():
     
     print(f"Writing file: {specific_problem}")
     distinct_phrases = score_df_no_context[['phrase_num', 'original_phrase']].drop_duplicates()
-    
-    save_loc = f"{args.save_loc}/{specific_problem}.xlsx"
-    
+        
     with pd.ExcelWriter(save_loc, engine="openpyxl") as xls:
         
         clean_for_excel(docs_df).to_excel(xls, sheet_name="docs", index=False)
