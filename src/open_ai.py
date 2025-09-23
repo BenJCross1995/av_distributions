@@ -17,7 +17,7 @@ def initialise_client(credential_loc: Optional[str] = None, env_var: str = "OPEN
     key: Optional[str] = None
 
     if credential_loc:
-        with open("../../../credentials.json") as f:
+        with open(credential_loc) as f:
             credentials = json.load(f)
             key = credentials['OPENAI_API_KEY']
         if not key:
