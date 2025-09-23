@@ -112,7 +112,7 @@ def main():
     args=parse_args()
     
     # Ensure the directory exists before beginning
-    os.mkdir(args.save_loc, exist_ok=True)
+    os.makedirs(args.save_loc, exist_ok=True)
     
     # -----
     # LOAD DATA & LOCAL MODEL
