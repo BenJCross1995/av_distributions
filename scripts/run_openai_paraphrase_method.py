@@ -85,6 +85,7 @@ def parse_args():
     ap.add_argument("--metadata_loc")
     ap.add_argument("--model_loc")
     ap.add_argument("--save_loc")
+    ap.add_argument("--completed_loc", default=None)
     # Dataset hinting
     ap.add_argument("--corpus", default="Wiki")
     ap.add_argument("--data_type", default="training")
@@ -120,11 +121,17 @@ def main():
     specific_problem = f"{args.known_doc} vs {args.unknown_doc}"
     save_loc = f"{args.save_loc}/{specific_problem}.xlsx"
     
+    if args.completed_loc:
+        completed_loc = f"{args.completed_loc}/{specific_problem}.xlsx"
+        if os.path.exists(completed_loc):
+            print(f"Result for {specific_problem} already exists in the completed folder. Exiting.")
+            sys.exit()
+    
     # Skip the problem if already exists
     if os.path.exists(save_loc):
         print(f"Path {save_loc} already exists. Exiting.")
         sys.exit()
-    
+        
     print(f"Working on problem: {specific_problem}")
     
     print("Loading model")
