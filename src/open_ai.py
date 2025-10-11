@@ -4,9 +4,6 @@ import json
 from typing import Optional, Any
 from openai import OpenAI
 
-# My own modules
-from read_and_write_docs import read_jsonl
-
 def initialise_client(credential_loc: Optional[str] = None, env_var: str = "OPENAI_API_KEY") -> OpenAI:
     """
     If `credential_loc` is provided, use your existing `read_jsonl(credential_loc)` to find `env_var`

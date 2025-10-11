@@ -1,6 +1,7 @@
 import re
 import torch
 import math
+import string
 
 import pandas as pd
 
@@ -107,19 +108,14 @@ def pretty_print_common_ngrams(
     order: str = "count_desc",      # "count_desc" | "len_asc" | "len_desc"
     tokenizer=None,                 # Optional HuggingFace tokenizer
     return_format: str = "print",   # "print" | "flat" | "grouped"
-) -> Union[None, List[str], Dict[int, List[str]]]:
+    show_raw: bool = False          # If True, include raw token forms
+) -> Union[None, List[Union[str, Tuple[str, str]]], Dict[int, List[Union[str, Tuple[str, str]]]]]:
     """
-    Pretty-print or return shared n-grams.
+    Pretty-print or return shared n-grams, optionally paired with raw form.
+    If show_raw=True, each output element is a tuple (pretty_str, raw_repr).
+    raw_repr is a string representing the token tuple, e.g. "('Ġhello', 'Ġworld')".
+    """
 
-    - Groups by n (the integer length).
-    - If `tokenizer` is None: converts each n-gram tuple into a string joined by `sep` (original behavior).
-    - If `tokenizer` is provided: decodes token ids/strings to readable text (special tokens removed).
-    - `order` controls group ordering (and the flattening order for "flat").
-    - `return_format`:
-        * "print"   -> prints grouped output and returns None (default; original behavior).
-        * "flat"    -> returns a single flattened list of strings across all n values, ordered by `order`.
-        * "grouped" -> returns a dict[int, list[str]] of strings per n (keys are the n values).
-    """
     if not common:
         if return_format == "print":
             print("{}")
@@ -127,14 +123,12 @@ def pretty_print_common_ngrams(
         return [] if return_format == "flat" else {}
 
     def stringify_ngram(ngram: Tuple[Any, ...]) -> str:
-        # Original behavior (no tokenizer): join items with sep
+        """Convert to human-readable text, using tokenizer if available."""
         if tokenizer is None:
             return sep.join(map(str, ngram))
 
-        # With tokenizer: decode to human-readable text
         toks = list(ngram)
-
-        # If everything is ids, use fast decode
+        # If all ints, decode in one shot
         if all(isinstance(t, int) for t in toks):
             return tokenizer.decode(
                 toks,
@@ -142,29 +136,39 @@ def pretty_print_common_ngrams(
                 clean_up_tokenization_spaces=False,
             )
 
-        # Otherwise, we may have token *strings* or a mix of ids & strings
+        # Otherwise, convert each token (id or str) to string form
         specials = set(getattr(tokenizer, "all_special_tokens", []))
         norm_tokens: List[str] = []
         for t in toks:
             if isinstance(t, int):
-                # convert id -> token string
                 norm_tokens.append(tokenizer.convert_ids_to_tokens(t))
             else:
                 norm_tokens.append(str(t))
 
-        # Drop special tokens (e.g., <s>, </s>)
+        # Filter out special tokens like <s>, </s>
         norm_tokens = [t for t in norm_tokens if t not in specials]
 
-        # Let the tokenizer handle spacing/newlines between tokens
         return tokenizer.convert_tokens_to_string(norm_tokens)
 
-    # Convert tuples to strings per length key
-    grouped: Dict[int, List[str]] = {
-        n: sorted(stringify_ngram(g) for g in grams)
-        for n, grams in common.items()
-    }
+    def raw_repr_of_ngram(ngram: Tuple[Any, ...]) -> str:
+        """Return a string showing the raw token tuple, as tokens or ints."""
+        # We want something like "('Ġhello', 'Ġworld')" or "(12, 34, 56)" or mixed
+        return "(" + ", ".join(repr(tok) for tok in ngram) + ")"
 
-    # Choose group ordering
+    # Build grouped mapping: for each n, a list of pretty or (pretty, raw)
+    grouped: Dict[int, List[Union[str, Tuple[str, str]]]] = {}
+    for n, grams in common.items():
+        out_list: List[Union[str, Tuple[str, str]]] = []
+        for g in sorted(grams):
+            pretty = stringify_ngram(g)
+            if show_raw:
+                raw = raw_repr_of_ngram(g)
+                out_list.append( (pretty, raw) )
+            else:
+                out_list.append(pretty)
+        grouped[n] = out_list
+
+    # Order the groups by your `order`
     if order == "count_desc":
         items = sorted(grouped.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     elif order == "len_asc":
@@ -172,25 +176,99 @@ def pretty_print_common_ngrams(
     elif order == "len_desc":
         items = sorted(grouped.items(), key=lambda kv: -kv[0])
     else:
-        # Fallback to default
         items = sorted(grouped.items(), key=lambda kv: (-len(kv[1]), kv[0]))
 
     if return_format == "flat":
-        # Flatten respecting the chosen group order and per-group alpha sorting
-        flat: List[str] = [s for _, strings in items for s in strings]
+        flat: List[Union[str, Tuple[str, str]]] = []
+        for _, lst in items:
+            flat.extend(lst)
         return flat
 
     if return_format == "grouped":
-        # Return the grouped mapping (unordered by default dict semantics).
-        # If you want the ordering preserved, convert `items` to an OrderedDict externally.
         return grouped
 
-    # Default: print grouped nicely and return None
-    for n, strings in items:
-        print(f"{n}-grams ({len(strings)}): {strings}")
+    # print mode
+    for n, lst in items:
+        if show_raw:
+            # print each as "pretty (raw: …)"
+            pretty_with_raw = [f"{p}  [raw: {r}]" for (p, r) in lst]
+            print(f"{n}-grams ({len(lst)}): {pretty_with_raw}")
+        else:
+            print(f"{n}-grams ({len(lst)}): {lst}")
+
     return None
 
-        
+def filter_ngrams(
+    ngrams_dict: Dict[int, Iterable[Tuple[str, ...]]],
+    *,
+    special_tokens: Iterable[str] = ('Ġ', 'Ċ'),   # used for classification
+    boundary_markers: Iterable[str] = None        # used for "spans multiple words"
+) -> Dict[int, set]:
+    """
+    Filters n-grams with these rules:
+    - Must be at least 2 tokens.
+    - Must not be just a word + punctuation.
+    - Must represent more than one word (i.e., some later token starts with a *boundary marker*).
+    - Must not be a 2-gram where one token is a word and the other is only punctuation or special token.
+
+    Notes:
+    - `special_tokens` are the glyphs you consider "special" for classification (e.g., Ċ for newline).
+    - `boundary_markers` are the prefixes that mean "this token begins a new word".
+       Defaults to common space markers ('Ġ' for byte-level BPE, '▁' for SentencePiece).
+    """
+    special_tokens = tuple(special_tokens)
+    specials_joined = ''.join(special_tokens)
+
+    # Default boundary markers if none provided
+    if boundary_markers is None or tuple(boundary_markers) == ():
+        boundary_markers = ('Ġ', '▁')  # space markers in GPT-2/RoBERTa & SentencePiece
+    boundary_markers = tuple(boundary_markers)
+
+    def is_punctuation(token: str) -> bool:
+        # Strip only the configured special prefixes; do NOT call lstrip() with no arg.
+        stripped = token.lstrip(specials_joined) if specials_joined else token
+        return bool(stripped) and all(ch in string.punctuation for ch in stripped)
+
+    def is_special_only(token: str) -> bool:
+        return bool(token) and all(ch in (string.punctuation + specials_joined) for ch in token)
+
+    def is_word(token: str) -> bool:
+        return not is_punctuation(token) and not is_special_only(token)
+
+    def valid_length(ngram: Tuple[str, ...]) -> bool:
+        return len(ngram) >= 2
+
+    def not_word_and_punct_only(ngram: Tuple[str, ...]) -> bool:
+        # Allow only if more than one token is a word
+        return sum(is_word(tok) for tok in ngram) > 1
+
+    def spans_multiple_words(ngram: Tuple[str, ...]) -> bool:
+        # At least one token after the first starts with a boundary marker
+        return any(tok.startswith(boundary_markers) for tok in ngram[1:])
+
+    def not_word_vs_special_or_punct(ngram: Tuple[str, ...]) -> bool:
+        if len(ngram) != 2:
+            return True
+        tok1, tok2 = ngram
+        return not (
+            (is_word(tok1) and not is_word(tok2)) or
+            (not is_word(tok1) and is_word(tok2))
+        )
+
+    filters = [
+        valid_length,
+        not_word_and_punct_only,
+        spans_multiple_words,
+        not_word_vs_special_or_punct,
+    ]
+
+    filtered: Dict[int, set] = {}
+    for n, ngrams in ngrams_dict.items():
+        kept = {ng for ng in ngrams if all(f(ng) for f in filters)}
+        if kept:
+            filtered[n] = kept
+    return filtered
+     
 def highest_common(common: Dict[int, Set[Tuple[Any, ...]]]) -> Tuple[int, Set[Tuple[Any, ...]]]:
     """
     Given the dict returned by `common_ngrams`, return (max_n, ngrams_at_max).
@@ -280,7 +358,8 @@ def largest_common_ngram_problems(
 
             # If your common_ngrams expects n, switch to: common_ngrams(text_known, text_unknown, n)
             common = common_ngrams(text_known, text_unknown, n=n, model=model, tokenizer=tokenizer)
-            hc = highest_common(common)
+            filtered_common = filter_ngrams(common)
+            hc = highest_common(filtered_common)
 
             if hc is None:
                 count_val = None
@@ -537,6 +616,7 @@ def largest_common_ngram_profile_problems(
                     include_subgrams=include_subgrams,
                     lowercase=lowercase,  # requires your updated common_ngrams
                 )
+                common = filter_ngrams(common)
             except TypeError:
                 # Backward-compat if your common_ngrams doesn't take lowercase/include_subgrams
                 common = common_ngrams(
@@ -546,7 +626,7 @@ def largest_common_ngram_profile_problems(
                     model=model,
                     tokenizer=tokenizer,
                 )
-
+                common = filter_ngrams(common)
             hc = _highest_common(common) if common else None
             if hc is None:
                 count_val = None
@@ -603,6 +683,38 @@ def keep_before_phrase(text: str, phrase: str, case_insensitive: bool = False) -
 
     return text[:idx] if idx != -1 else text
 
+def find_all_occurrences_no_overlap(
+    text: str,
+    phrase: str,
+    case_insensitive: bool = False
+) -> List[int]:
+    if not phrase:
+        return []
+
+    haystack = text if not case_insensitive else text.casefold()
+    needle = phrase if not case_insensitive else phrase.casefold()
+
+    indices: List[int] = []
+    start = 0
+    L = len(needle)
+
+    while True:
+        idx = haystack.find(needle, start)
+        if idx == -1:
+            break
+        indices.append(idx)
+        start = idx + L  # non-overlapping
+    return indices
+
+
+def keep_before_phrase_all(text: str, phrase: str, case_insensitive: bool = False) -> List[str]:
+    """
+    Return the prefix of `text` before each non-overlapping occurrence of `phrase`.
+    If none found, returns [text].
+    """
+    idxs = find_all_occurrences_no_overlap(text, phrase, case_insensitive)
+    return [text[:i] for i in idxs] if idxs else [text]
+
 def compute_log_probs_with_median(text: str, tokenizer, model):
     """
     For each token (including the first), returns:
@@ -610,9 +722,13 @@ def compute_log_probs_with_median(text: str, tokenizer, model):
       - log_probs: list of log-probs for each token
       - median_logprobs: median log-prob of the distribution at each step
     """
+    
     inputs = tokenizer(text, return_tensors="pt")
-    input_ids = inputs["input_ids"]         # shape [1, seq_len]
+    input_ids = inputs["input_ids"]    # shape [1, seq_len]
     # --- ALIGN TOKENS CORRECTLY HERE ---
+    print("DEBUG input dtype:", inputs["input_ids"].dtype)
+    print("DEBUG input:", repr(text))
+    print("DEBUG token count:", input_ids.shape[1])
     tokens = tokenizer.convert_ids_to_tokens(input_ids[0])
 
     with torch.no_grad():
@@ -731,7 +847,58 @@ def get_scored_df(n_gram_dict, full_text, tokenizer, model):
     out = out.sort_values(["phrase_num", "rank"], kind="mergesort").reset_index(drop=True)
 
     return out
-    
+
+def get_scored_df(n_gram_dict, full_text, tokenizer, model):
+    """
+    Row-concat each scored df across ALL non-overlapping occurrences of each phrase,
+    add phrase_num and phrase_occurence (1-based), then sort and rank paraphrases
+    within each phrase_num (preserves original behavior).
+    """
+    dfs = []
+    for phrase_num, entry in n_gram_dict.items():  # relies on insertion order
+        print(f"Processing Phrase - {phrase_num}")
+        phrase = entry["phrase"]
+        paraphrases = entry["paraphrases"]
+        print(f"Phrase: {phrase}")
+        print(f"Paraphrases: {paraphrases}")
+
+        # Get all prefixes before each non-overlapping occurrence (case-insensitive)
+        base_text_list = keep_before_phrase_all(full_text, phrase, case_insensitive=True)
+
+        # Score each occurrence separately; add phrase_occurence starting at 1
+        for occ_idx, base_text in enumerate(base_text_list, start=1):
+            df = score_phrases(base_text, phrase, paraphrases, tokenizer, model).copy()
+            # Insert metadata columns at the front: phrase_num, phrase_occurence, original_phrase
+            df.insert(0, "original_phrase", phrase)
+            df.insert(0, "phrase_occurence", occ_idx)
+            df.insert(0, "phrase_num", phrase_num)
+            dfs.append(df)
+
+    if not dfs:
+        return pd.DataFrame(columns=["phrase_num"])
+
+    out = pd.concat(dfs, ignore_index=True)
+
+    # sort primarily by phrase_num (as before), then by occurrence for readability
+    out = out.sort_values(["phrase_num", "phrase_occurence"], kind="mergesort").reset_index(drop=True)
+
+    # rank within phrase_num: reference -> 0; paraphrases ranked by descending raw_prob starting at 1
+    out["rank"] = None
+    mask = out["phrase_type"].eq("paraphrase")
+    out.loc[mask, "rank"] = (
+        out.loc[mask]
+           .groupby(["phrase_num", "phrase_occurence"])["raw_prob"]
+           .rank(method="first", ascending=False)
+           .astype(int)
+    )
+    out.loc[out["phrase_type"].eq("reference"), "rank"] = 0
+    out["rank"] = out["rank"].astype(int)
+
+    # final ordering: phrase_num, occurrence, then rank (stable mergesort)
+    out = out.sort_values(["phrase_num", "phrase_occurence", "rank"], kind="mergesort").reset_index(drop=True)
+
+    return out
+
 def _logsumexp(xs: Sequence[float]) -> float:
     m = max(xs)
     return m + math.log(sum(math.exp(x - m) for x in xs))
