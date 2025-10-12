@@ -64,7 +64,7 @@ def create_user_prompt(known_text, phrase, raw_phrase):
     
     return user_prompt
 
-def parse_paraphrases(response, phrase):
+def parse_paraphrases(response, phrase, lowercase=True):
     """Extract paraphrases from OpenAI response (JSON mode)."""
     paraphrase_list = []
     for i in range(1, len(response.choices)):
@@ -74,7 +74,10 @@ def parse_paraphrases(response, phrase):
             content_json = json.loads(content)
             for para in content_json['paraphrases']:
                 if para != phrase:
-                    paraphrase_list.append(para)  
+                    if lowercase:
+                        paraphrase_list.append(para.lower())
+                    else:
+                        paraphrase_list.append(para)  
         except Exception:
             continue
         
@@ -239,23 +242,42 @@ def main():
         # -----
         
         print(f"Writing file: {specific_problem}")
-        llr_cols = ['phrase_num', 'phrase_occurence', 'original_phrase']
+        
+        # Run the new Excel function
+        create_excel_template(
+            known=known_scored,
+            unknown=unknown_scored,
+            no_context=score_df_no_context,
+            metadata=problem_metadata,
+            docs=docs_df,
+            path=save_loc,
+            known_sheet="known",
+            unknown_sheet="unknown",
+            nc_sheet="no context",
+            metadata_sheet="metadata",
+            docs_sheet="docs",
+            llr_sheet="LLR",
+            use_xlookup=False
+        )
 
-        distinct_phrases = (
-            pd.concat([unknown_scored[llr_cols], known_scored[llr_cols]], ignore_index=True)
-            .drop_duplicates()
-            .sort_values(['phrase_num', 'phrase_occurence'], kind='mergesort')
-            .reset_index(drop=True)
-)
+#         print(f"Writing file: {specific_problem}")
+#         llr_cols = ['phrase_num', 'phrase_occurence', 'original_phrase']
+
+#         distinct_phrases = (
+#             pd.concat([unknown_scored[llr_cols], known_scored[llr_cols]], ignore_index=True)
+#             .drop_duplicates()
+#             .sort_values(['phrase_num', 'phrase_occurence'], kind='mergesort')
+#             .reset_index(drop=True)
+# )
             
-        with pd.ExcelWriter(save_loc, engine="openpyxl") as xls:
+#         with pd.ExcelWriter(save_loc, engine="openpyxl") as xls:
             
-            clean_for_excel(docs_df).to_excel(xls, sheet_name="docs", index=False)
-            clean_for_excel(problem_metadata).to_excel(xls, sheet_name="metadata", index=False)
-            clean_for_excel(score_df_no_context).to_excel(xls, sheet_name="no context", index=False)
-            clean_for_excel(known_scored).to_excel(xls, sheet_name="known", index=False)
-            clean_for_excel(unknown_scored).to_excel(xls, sheet_name="unknown", index=False)
-            clean_for_excel(distinct_phrases).to_excel(xls, sheet_name="LLR", index=False)
+#             clean_for_excel(docs_df).to_excel(xls, sheet_name="docs", index=False)
+#             clean_for_excel(problem_metadata).to_excel(xls, sheet_name="metadata", index=False)
+#             clean_for_excel(score_df_no_context).to_excel(xls, sheet_name="no context", index=False)
+#             clean_for_excel(known_scored).to_excel(xls, sheet_name="known", index=False)
+#             clean_for_excel(unknown_scored).to_excel(xls, sheet_name="unknown", index=False)
+#             clean_for_excel(distinct_phrases).to_excel(xls, sheet_name="LLR", index=False)
     
     else:
         print("Not scoring texts")
