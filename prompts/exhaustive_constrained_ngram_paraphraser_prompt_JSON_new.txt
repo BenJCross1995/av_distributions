@@ -112,3 +112,4 @@ Now wait for this input format:
 <NGRAM>
 {target n-gram here}
 </NGRAM>
+

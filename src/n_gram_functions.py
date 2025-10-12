@@ -723,12 +723,18 @@ def compute_log_probs_with_median(text: str, tokenizer, model):
       - median_logprobs: median log-prob of the distribution at each step
     """
     
+    if not isinstance(text, str):
+        print(f"[ERROR] Expected `text` to be a string, got {type(text)}: {text}")
+        
     inputs = tokenizer(text, return_tensors="pt")
+    
+    if inputs["input_ids"].dtype != torch.long:
+        # Log once if you like; this should normally not trigger.
+        # print(f"[warn] input_ids dtype was {enc['input_ids'].dtype}, casting to long")
+        inputs["input_ids"] = inputs["input_ids"].to(torch.long)
+        
     input_ids = inputs["input_ids"]    # shape [1, seq_len]
     # --- ALIGN TOKENS CORRECTLY HERE ---
-    print("DEBUG input dtype:", inputs["input_ids"].dtype)
-    print("DEBUG input:", repr(text))
-    print("DEBUG token count:", input_ids.shape[1])
     tokens = tokenizer.convert_ids_to_tokens(input_ids[0])
 
     with torch.no_grad():
@@ -761,8 +767,11 @@ def score_phrases(
       raw_prob = exp(sum_log_probs_phrase)
     """
     # 1) score base_text
-    _, log_probs_base, _ = compute_log_probs_with_median(base_text.strip(), tokenizer, model)
-    base_total = sum(log_probs_base)
+    if len(base_text) > 0:
+        _, log_probs_base, _ = compute_log_probs_with_median(base_text.strip(), tokenizer, model)
+        base_total = sum(log_probs_base)
+    else:
+        base_total = 0
 
     items = [("reference", ref_phrase)] + [("paraphrase", p) for p in paraphrases]
     rows = []
@@ -859,8 +868,6 @@ def get_scored_df(n_gram_dict, full_text, tokenizer, model):
         print(f"Processing Phrase - {phrase_num}")
         phrase = entry["phrase"]
         paraphrases = entry["paraphrases"]
-        print(f"Phrase: {phrase}")
-        print(f"Paraphrases: {paraphrases}")
 
         # Get all prefixes before each non-overlapping occurrence (case-insensitive)
         base_text_list = keep_before_phrase_all(full_text, phrase, case_insensitive=True)
