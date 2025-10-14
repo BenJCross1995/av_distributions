@@ -12,7 +12,7 @@ set -e  # optional: stop on error
 # module load apps/binapps/anaconda3/2024.10
 
 # Activate the environment
-conda activate paraphrase_env
+conda activate venv
 
 # Define variables
 CORPUS="Wiki"
