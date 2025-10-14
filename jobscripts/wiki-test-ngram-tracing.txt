@@ -1,0 +1,51 @@
+#!/bin/bash --login
+
+#SBATCH -J Wiki_test_ngram
+#SBATCH -a 1-225 # Change to the amount in the list
+#SBATCH -p himem
+#SBATCH -t 7-0
+# #SBATCH -hold_jid NO HOLDING
+
+set -e  # optional: stop on error
+
+# Load conda module
+# module load apps/binapps/anaconda3/2024.10
+
+# Activate the environment
+conda activate paraphrase_env
+
+# Define variables
+CORPUS="Wiki"
+DATA_TYPE="test"
+OPENAI_MODEL="gpt-4.1"
+MAX_TOKENS=5000
+TEMPERATURE=0.7
+N_SAMPLES=10
+
+IMPOSTOR_FILE="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/known_doc_list.txt"
+KNOWN_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/known_raw.jsonl"
+UNKNOWN_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/unknown_raw.jsonl"
+METADATA_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/metadata.rds"
+PROMPT_LOC="/mnt/hum01-home01/d34195bc/projects/av_distributions/prompts/exhaustive_constrained_ngram_paraphraser_prompt_JSON_newv2.txt"
+
+# Get the Nth line from PARASCORE_FILE
+MYFILE=$(awk "NR==${SLURM_ARRAY_TASK_ID} {print}" "${IMPOSTOR_FILE}")
+
+# Run top impostors on the Nth file from parascore folder
+python /mnt/hum01-home01/d34195bc/projects/av_distributions/scripts/run_openai_paraphrase_method.py \
+    --known_loc "${KNOWN_LOC}" \
+    --unknown_loc "${UNKNOWN_LOC}" \
+    --metadata_loc "${METADATA_LOC}" \
+    --model_loc <<MODEL LOC>> \
+    --save_loc <<SAVE LOC>> \
+    --prompt_loc "${PROMPT_LOC}" \
+    --completed_loc <<COMPLETED_LOC>> \
+    --corpus "${CORPUS}" \
+    --data_type "${DATE_TYPE}" \
+    --known_doc <<KNOWN DOC>> \
+    --unknown_doc <<UNKNOWN DOC>> \
+    --openai_model "${OPENAI_MODEL}" \
+    --max_tokens ${MAX_TOKENS} \
+    --temperature ${TEMPERATURE} \
+    --n ${N_SAMPLES} \
+    --score_texts

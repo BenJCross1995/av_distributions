@@ -20,20 +20,26 @@ def add_include_phrase_lookup_column(
 ) -> None:
     """
     Append an 'include_phrase' formula column to ws_target that pulls from the
-    No Context sheet's include_phrase by matching phrase_num.
+    No Context sheet's include_phrase by matching BOTH:
+      - phrase_num  (target vs no_context)
+      - phrase text (target 'phrase' header vs no_context 'phrase' header)
+    The target 'phrase' column is located by header name (case-insensitive).
     """
-    # Validations
-    if "phrase_num" not in target_df.columns:
-        raise ValueError("target_df is missing required column 'phrase_num'.")
-    if "phrase_num" not in no_context.columns:
-        raise ValueError("no_context is missing required column 'phrase_num'.")
+    # Validations (dataframes)
+    for col in ("phrase_num",):
+        if col not in target_df.columns:
+            raise ValueError(f"target_df is missing required column '{col}'.")
+        if col not in no_context.columns:
+            raise ValueError(f"no_context is missing required column '{col}'.")
     if "include_phrase" not in no_context.columns:
         raise ValueError("no_context is missing required column 'include_phrase'.")
+    if "phrase" not in no_context.columns:
+        raise ValueError("no_context is missing required column 'phrase'.")
 
     t_rows = len(target_df)
-    t_start, t_end = 2, 1 + t_rows  # headers row=1
+    t_start, t_end = 2, 1 + t_rows  # headers are on row 1
 
-    # Place the new column at the end
+    # Create/label the new column at the end of target
     new_col_idx = target_df.shape[1] + 1
     new_col_letter = get_column_letter(new_col_idx)
     ws_target[f"{new_col_letter}1"] = "include_phrase"
@@ -41,10 +47,21 @@ def add_include_phrase_lookup_column(
     if t_rows == 0:
         return
 
-    # Column letters
-    t_phrase_idx = target_df.columns.get_loc("phrase_num") + 1
-    t_phrase_col = get_column_letter(t_phrase_idx)
+    # Locate target 'phrase_num' and 'phrase' columns
+    t_phrase_num_idx = target_df.columns.get_loc("phrase_num") + 1
+    t_phrase_num_col = get_column_letter(t_phrase_num_idx)
 
+    # Find the header named 'phrase' on the target sheet (row 1), case-insensitive
+    target_phrase_text_col_letter = None
+    for idx, cell in enumerate(ws_target[1], start=1):
+        val = (cell.value or "").strip()
+        if val and val.lower() == "phrase":
+            target_phrase_text_col_letter = get_column_letter(idx)
+            break
+    if not target_phrase_text_col_letter:
+        raise ValueError("Couldn't find a column with header 'phrase' on the target sheet.")
+
+    # Build no_context ranges (bounded to its current size)
     nc_rows = len(no_context)
     nc_start, nc_end = 2, 1 + nc_rows
     if nc_rows == 0:
@@ -52,24 +69,38 @@ def add_include_phrase_lookup_column(
             ws_target[f"{new_col_letter}{r}"] = ""
         return
 
-    nc_phrase_idx = no_context.columns.get_loc("phrase_num") + 1
-    nc_incl_idx   = no_context.columns.get_loc("include_phrase") + 1
-    nc_phrase_col = get_column_letter(nc_phrase_idx)
-    nc_incl_col   = get_column_letter(nc_incl_idx)
+    # Column letters in no_context
+    nc_num_col = get_column_letter(no_context.columns.get_loc("phrase_num") + 1)
+    nc_txt_col = get_column_letter(no_context.columns.get_loc("phrase") + 1)
+    nc_inc_col = get_column_letter(no_context.columns.get_loc("include_phrase") + 1)
 
-    ncq = f"'{nc_sheet_name}'"  # quote for spaces/special chars
-    nc_phrase_rng = f"{ncq}!${nc_phrase_col}${nc_start}:${nc_phrase_col}${nc_end}"
-    nc_incl_rng   = f"{ncq}!${nc_incl_col}${nc_start}:${nc_incl_col}${nc_end}"
+    ncq = f"'{nc_sheet_name}'"  # quote sheet name for spaces
+    rng_num = f"{ncq}!${nc_num_col}${nc_start}:${nc_num_col}${nc_end}"
+    rng_txt = f"{ncq}!${nc_txt_col}${nc_start}:${nc_txt_col}${nc_end}"
+    rng_inc = f"{ncq}!${nc_inc_col}${nc_start}:${nc_inc_col}${nc_end}"
 
-    # Row formulas
+    # Per-row formulas with 2 criteria
     for r in range(t_start, t_end + 1):
-        target_phrase_cell = f"{t_phrase_col}{r}"
-        formula = (
-            f'=IFERROR(XLOOKUP({target_phrase_cell}, {nc_phrase_rng}, {nc_incl_rng}), "")'
-            if use_xlookup else
-            f'=IFERROR(INDEX({nc_incl_rng}, MATCH({target_phrase_cell}, {nc_phrase_rng}, 0)), "")'
-        )
+        a_num = f"{t_phrase_num_col}{r}"                 # current row phrase_num
+        a_txt = f"${target_phrase_text_col_letter}{r}"   # current row phrase text (by header)
+
+        if use_xlookup:
+            # =IFERROR(XLOOKUP(1, (rng_num=A2)*(rng_txt=$<phrase_col>2), rng_inc), "")
+            formula = (
+                f'=IFERROR('
+                f'XLOOKUP(1, ({rng_num}={a_num})*({rng_txt}={a_txt}), {rng_inc})'
+                f', "")'
+            )
+        else:
+            # =IFERROR(INDEX(rng_inc, MATCH(1, INDEX((rng_num=A2)*(rng_txt=$<phrase_col>2),0),0)), "")
+            formula = (
+                f'=IFERROR('
+                f'INDEX({rng_inc}, MATCH(1, INDEX(({rng_num}={a_num})*({rng_txt}={a_txt}), 0), 0))'
+                f', "")'
+            )
+
         ws_target[f"{new_col_letter}{r}"] = formula
+
         
 def add_llr_metrics(
     ws_llr, *,

@@ -64,3 +64,32 @@ def save_error_as_txt(data, folder_path):
     
     with open(file_path, 'w') as file:
         file.write(data)
+        
+def read_completed_excel_result(
+    excel_path: str | Path,
+    *,
+    required: tuple[str, ...] = ("docs", "known", "unknown", "metadata", "no_context", "LLR"),
+    engine: str = "openpyxl",
+) -> dict[str, pd.DataFrame | None]:
+    """
+    Read an Excel workbook and return a dict of DataFrames for the requested sheets.
+    Matching is case-insensitive and ignores spaces/underscores. Missing sheets -> None.
+    """
+    p = Path(excel_path)
+    if not p.exists():
+        raise FileNotFoundError(p)
+
+    # read all sheets once; sheet_name=None → dict of DataFrames keyed by sheet name
+    all_sheets: dict[str, pd.DataFrame] = pd.read_excel(p, sheet_name=None, engine=engine)
+
+    def norm(s: str) -> str:
+        return s.strip().lower().replace(" ", "_")
+
+    # normalized lookup of the actual workbook sheets
+    lookup = {norm(name): df for name, df in all_sheets.items()}
+
+    # return only the requested logical names (normalized)
+    out: dict[str, pd.DataFrame | None] = {}
+    for logical in required:
+        out[logical] = lookup.get(norm(logical))
+    return out

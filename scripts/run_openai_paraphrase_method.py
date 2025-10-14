@@ -74,7 +74,7 @@ def parse_paraphrases(response, phrase, lowercase=True):
             content_json = json.loads(content)
             for para in content_json['paraphrases']:
                 if para != phrase:
-                    if lowercase:
+                    if (lowercase) & (para.lower() != phrase):
                         paraphrase_list.append(para.lower())
                     else:
                         paraphrase_list.append(para)  
