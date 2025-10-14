@@ -1,7 +1,7 @@
 #!/bin/bash --login
 
 #SBATCH -J Wiki_test_ngram
-#SBATCH -a 1-672 # Change to the amount in the list
+#SBATCH -a 1-1 # Change to the amount in the list
 #SBATCH -p himem
 #SBATCH -t 7-0
 # #SBATCH -hold_jid NO HOLDING
