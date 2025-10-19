@@ -1,7 +1,7 @@
 #!/bin/bash --login
 
 #SBATCH -J Wiki_test_ngram
-#SBATCH -a 1-1 # Change to the amount in the list
+#SBATCH -a 1-100 # There are 672 in full dataset
 #SBATCH -p himem
 #SBATCH -t 7-0
 # #SBATCH -hold_jid NO HOLDING
@@ -9,15 +9,15 @@
 set -e  # optional: stop on error
 
 # Load conda module
-# module load apps/binapps/anaconda3/2024.10
+module load apps/binapps/anaconda3/2024.10
 
 # Activate the environment
-conda activate myenv
+conda activate venv
 
 # Define variables
 CORPUS="Wiki"
 DATA_TYPE="test"
-OPENAI_MODEL="gpt-4.1"
+HF_PARAPHRASE_MODEL="Qwen-2.5-0.5B"
 MAX_TOKENS=5000
 TEMPERATURE=0.7
 N_SAMPLES=10
@@ -31,24 +31,25 @@ UNKNOWN_LIST="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/unkn
 KNOWN_DOC=$(awk -v n="$SLURM_ARRAY_TASK_ID" 'NR==n {print; exit}' "$KNOWN_LIST")
 UNKNOWN_DOC=$(awk -v n="$SLURM_ARRAY_TASK_ID" 'NR==n {print; exit}' "$UNKNOWN_LIST")
 
-IMPOSTOR_FILE="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/known_doc_list.txt"
 KNOWN_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/known_raw.jsonl"
 UNKNOWN_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/unknown_raw.jsonl"
 METADATA_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/metadata.rds"
-SAVE_LOC="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}"
-COMPLETED_LOC="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}-completed"
+SAVE_LOC="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}-${HF_PARAPHRASE_MODEL}"
+COMPLETED_LOC="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}-${HF_PARAPHRASE_MODEL}-completed"
 PROMPT_LOC="/mnt/hum01-home01/d34195bc/projects/av_distributions/prompts/exhaustive_constrained_ngram_paraphraser_prompt_JSON_newv2.txt"
-MODEL_LOC="/mnt/hum01-home01/d34195bc/models/Qwen2.5-1.5B-Instruct"
+MODEL_LOC="/mnt/hum01-home01/d34195bc/models/Qwen2.5-0.5B-Instruct"
+PARAPHRASE_MODEL_LOC="/mnt/hum01-home01/d34195bc/models/Qwen2.5-0.5B-Instruct"
 
 # Get the Nth line from PARASCORE_FILE
 MYFILE=$(awk "NR==${SLURM_ARRAY_TASK_ID} {print}" "${IMPOSTOR_FILE}")
 
 # Run top impostors on the Nth file from parascore folder
-python /mnt/hum01-home01/d34195bc/projects/av_distributions/scripts/run_openai_paraphrase_method.py \
+python -u /mnt/hum01-home01/d34195bc/projects/av_distributions/scripts/run_hf_paraphrase_method.py \
     --known_loc "${KNOWN_LOC}" \
     --unknown_loc "${UNKNOWN_LOC}" \
     --metadata_loc "${METADATA_LOC}" \
     --model_loc "${MODEL_LOC}" \
+    --paraphrase_model_loc "${PARAPHRASE_MODEL_LOC}" \
     --save_loc "${SAVE_LOC}" \
     --prompt_loc "${PROMPT_LOC}" \
     --completed_loc "${COMPLETED_LOC}" \
@@ -56,7 +57,6 @@ python /mnt/hum01-home01/d34195bc/projects/av_distributions/scripts/run_openai_p
     --data_type "${DATE_TYPE}" \
     --known_doc "${KNOWN_DOC}" \
     --unknown_doc "${UNKNOWN_DOC}" \
-    --openai_model "${OPENAI_MODEL}" \
     --max_tokens ${MAX_TOKENS} \
     --temperature ${TEMPERATURE} \
     --n ${N_SAMPLES} \

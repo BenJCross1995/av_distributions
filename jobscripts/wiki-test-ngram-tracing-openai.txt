@@ -9,10 +9,10 @@
 set -e  # optional: stop on error
 
 # Load conda module
-# module load apps/binapps/anaconda3/2024.10
+module load apps/binapps/anaconda3/2024.10
 
 # Activate the environment
-conda activate myenv
+conda activate venv
 
 # Define variables
 CORPUS="Wiki"
@@ -38,13 +38,13 @@ METADATA_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/metadata.rds"
 SAVE_LOC="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}"
 COMPLETED_LOC="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}-completed"
 PROMPT_LOC="/mnt/hum01-home01/d34195bc/projects/av_distributions/prompts/exhaustive_constrained_ngram_paraphraser_prompt_JSON_newv2.txt"
-MODEL_LOC="/mnt/hum01-home01/d34195bc/models/Qwen2.5-1.5B-Instruct"
+MODEL_LOC="/mnt/hum01-home01/d34195bc/models/Qwen2.5-0.5B-Instruct"
 
 # Get the Nth line from PARASCORE_FILE
 MYFILE=$(awk "NR==${SLURM_ARRAY_TASK_ID} {print}" "${IMPOSTOR_FILE}")
 
 # Run top impostors on the Nth file from parascore folder
-python /mnt/hum01-home01/d34195bc/projects/av_distributions/scripts/run_openai_paraphrase_method.py \
+python -u /mnt/hum01-home01/d34195bc/projects/av_distributions/scripts/run_openai_paraphrase_method.py \
     --known_loc "${KNOWN_LOC}" \
     --unknown_loc "${UNKNOWN_LOC}" \
     --metadata_loc "${METADATA_LOC}" \

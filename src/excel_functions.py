@@ -523,6 +523,7 @@ def create_excel_template(
     docs_sheet: str = "docs",
     llr_sheet: str = "LLR",
     use_xlookup: bool = False,
+    highlight_phrases: bool = False
 ) -> Path:
     """
     Writes all sheets, builds a distinct phrases 'LLR' table, adds include_phrase lookups
@@ -573,15 +574,17 @@ def create_excel_template(
         ws_llr     = wb[llr_sheet]
         ws_docs = wb[docs_sheet]
 
-        highlight_overlaps_in_docs(
-            wb,
-            docs_sheet=docs_sheet,   # whatever you named it
-            llr_sheet=llr_sheet,     # whatever you named it
-            color_single="C00000",
-            color_overlap="FF8C00",
-            make_bold=True,
-            case_insensitive=True,
-        )
+        # Sometimes highlighting fails so adding for now
+        if highlight_phrases:
+            highlight_overlaps_in_docs(
+                wb,
+                docs_sheet=docs_sheet,   # whatever you named it
+                llr_sheet=llr_sheet,     # whatever you named it
+                color_single="C00000",
+                color_overlap="FF8C00",
+                make_bold=True,
+                case_insensitive=True,
+            )
         
         add_include_phrase_lookup_column(known, ws_known, no_context, nc_sheet, use_xlookup)
         add_include_phrase_lookup_column(unknown, ws_unknown, no_context, nc_sheet, use_xlookup)

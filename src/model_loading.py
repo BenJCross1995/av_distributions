@@ -1,7 +1,13 @@
 import string
+import torch
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from typing import Iterable, Dict, List, Optional
+from transformers.utils import is_accelerate_available
+from typing import Iterable, Dict, List, Optional, Tuple
+try:
+    from transformers import BitsAndBytesConfig
+except Exception:
+    BitsAndBytesConfig = None  # optional
 
 # -------------------------------------------------------------- #
 # ------------ LOAD MODEL FROM HUGGING FACE/LOCALLY ------------ #
@@ -11,6 +17,131 @@ def load_model(model_loc: str):
     """Load a local AutoModelForCausalLM and its tokenizer."""
     tokenizer = AutoTokenizer.from_pretrained(model_loc)
     model = AutoModelForCausalLM.from_pretrained(model_loc)
+    model.eval()
+    return tokenizer, model
+
+# -------------------------------------------------------------- #
+# ------------ MORE EFFICIENT MODEL LOADING FROM HF ------------ #
+# -------------------------------------------------------------- #
+
+_DTYPE_MAP = {
+    "auto": "auto",
+    "float16": torch.float16,
+    "bfloat16": torch.bfloat16,
+    "float32": torch.float32,
+}
+
+def load_model_efficient(
+    model_path: str,
+    device: str = "auto",            # "auto" | "cpu" | "cuda" | "mps"
+    dtype: str = "auto",              # "auto" | "float16" | "bfloat16" | "float32"
+    load_in_8bit: bool = False,
+    load_in_4bit: bool = False,
+    compile_model: bool = False,
+    trust_remote_code: bool = False,
+    use_fast_tokenizer: bool = True,
+):
+    """
+    Efficient local loader for causal/chat LLMs.
+
+    - Uses device_map="auto" and low_cpu_mem_usage only when 🤗 Accelerate is importable.
+    - Optional 8-bit / 4-bit quantization via bitsandbytes (GPU + Accelerate required).
+    - Works on CPU / CUDA / MPS; falls back gracefully if Accelerate isn't present.
+    - Ensures a pad_token_id exists (defaults to eos_token_id if missing).
+    """
+
+    # Map string dtype -> torch dtype
+    _DTYPE_MAP = {
+        "auto": "auto",
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }
+    if dtype not in _DTYPE_MAP:
+        raise ValueError(f"Unsupported dtype: {dtype!r}. Use one of {list(_DTYPE_MAP.keys())}.")
+    torch_dtype = _DTYPE_MAP[dtype]
+
+    # Detect Accelerate
+    try:
+        have_accel = bool(is_accelerate_available())
+    except Exception:
+        have_accel = False
+
+    # Resolve device
+    if device == "auto":
+        if torch.cuda.is_available():
+            resolved_device = "cuda"
+        elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            resolved_device = "mps"
+        else:
+            resolved_device = "cpu"
+    else:
+        resolved_device = device
+
+    # Use device_map only if Accelerate is available (prevents the common error)
+    device_map = "auto" if (resolved_device in ("cuda", "mps") and have_accel) else None
+
+    # Quantization prechecks
+    if (load_in_8bit or load_in_4bit) and not have_accel:
+        raise ValueError(
+            "8-bit/4-bit quantization requires the 'accelerate' package. "
+            "Install it or disable quantization."
+        )
+    if (load_in_8bit or load_in_4bit) and BitsAndBytesConfig is None:
+        raise ImportError(
+            "bitsandbytes is not available. Install it to use 8-bit/4-bit quantization."
+        )
+    if (load_in_8bit or load_in_4bit) and resolved_device == "cpu":
+        raise ValueError("8-bit/4-bit quantization requires a GPU; set device='cuda' or disable quantization.")
+
+    quantization_config = None
+    if BitsAndBytesConfig is not None and (load_in_8bit or load_in_4bit):
+        quantization_config = BitsAndBytesConfig(
+            load_in_8bit=load_in_8bit,
+            load_in_4bit=load_in_4bit,
+            llm_int8_enable_fp32_cpu_offload=False,
+        )
+
+    # Tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        use_fast=use_fast_tokenizer,
+        trust_remote_code=trust_remote_code,
+    )
+
+    # Build model kwargs
+    model_kwargs = dict(trust_remote_code=trust_remote_code)
+    if have_accel:
+        model_kwargs["low_cpu_mem_usage"] = True
+    if device_map is not None:
+        model_kwargs["device_map"] = device_map
+    if quantization_config is not None:
+        model_kwargs["quantization_config"] = quantization_config
+    elif torch_dtype != "auto":
+        model_kwargs["torch_dtype"] = torch_dtype
+
+    # Load model
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        **model_kwargs,
+    )
+
+    # Ensure pad token exists
+    if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+
+    # If we didn't use device_map, move whole model now
+    if device_map is None:
+        model.to(resolved_device)
+
+    # Optional compile (PyTorch 2.x)
+    if compile_model:
+        try:
+            model = torch.compile(model)
+        except Exception:
+            pass
+
     model.eval()
     return tokenizer, model
 
