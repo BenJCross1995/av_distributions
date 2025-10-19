@@ -337,11 +337,13 @@ def main():
     # -----
     print("Generating paraphrases with local HF model")
     n_gram_dict = {}
-    width = len(str(len(n_gram_list)))  # e.g., 10 -> 2, 100 -> 3
-
+    total_phrases = len(n_gram_list)
+    width = len(str(total_phrases))  # e.g., 10 -> 2, 100 -> 3
+    
     system_prompt = create_system_prompt(args.prompt_loc)
 
     for idx, (phrase_pretty, phrase_raw) in enumerate(n_gram_list, start=1):
+        print(f"Paraphrase {idx} out of {total_phrases}", flush=True)
         user_prompt = create_user_prompt(known_text, phrase_pretty, raw_phrase=phrase_raw)
         response = paraphrase_with_hf(
             para_tokenizer,
