@@ -21,7 +21,6 @@ MODEL_LOC="/mnt/hum01-home01/d34195bc/models/gemma-3-270m"
 DATA_DIR="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}"
 SAVE_DIR="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}-completed-gemma"
 
-
 # Input lists produced in step 1:
 PROBLEM_DOC_LIST="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/problem_doc_list.txt"
 
