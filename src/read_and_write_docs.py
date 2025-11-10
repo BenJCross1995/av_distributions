@@ -7,7 +7,7 @@ import pandas as pd
 
 from datetime import datetime
 from pathlib import Path
-from typing import Union
+from typing import Union, Iterable, Dict, Optional
 
 def read_jsonl(file_path):
     """Reads a JSONL file and converts it into a pandas DataFrame."""
@@ -93,3 +93,41 @@ def read_completed_excel_result(
     for logical in required:
         out[logical] = lookup.get(norm(logical))
     return out
+
+def read_excel_sheets(
+    file_path: str | Path,
+    sheet_names: Optional[Iterable[str]] = None,
+) -> Dict[str, pd.DataFrame]:
+    """
+    Read sheets from an Excel file into a dict of DataFrames.
+
+    Parameters:
+    - file_path: Path to the Excel file.
+    - sheet_names: Names of the sheets you want to load. If None or empty, all sheets are read.
+
+    Returns:
+    - Dictionary where each key is a sheet name and each value is the corresponding DataFrame.
+    """
+    # If no sheet names provided -> load all sheets
+    if sheet_names is None:
+        return pd.read_excel(file_path, sheet_name=None)
+
+    # Convert to list so we can check if it's empty and reuse it
+    sheet_names = list(sheet_names)
+    if len(sheet_names) == 0:
+        return pd.read_excel(file_path, sheet_name=None)
+
+    # Load workbook structure once
+    xls = pd.ExcelFile(file_path)
+
+    missing = [s for s in sheet_names if s not in xls.sheet_names]
+    if missing:
+        raise ValueError(
+            f"These sheets were not found in {file_path}: {missing}. "
+            f"Available sheets: {xls.sheet_names}"
+        )
+
+    return {
+        name: pd.read_excel(xls, sheet_name=name)
+        for name in sheet_names
+    }

@@ -1,0 +1,66 @@
+#!/bin/bash --login
+
+#SBATCH -J Wiki_test_ngram
+#SBATCH -a 1-1 # There are 672 in full dataset
+#SBATCH -p gpuL
+#SBATCH -t 4-0 # Max 4 days since GPU node
+#SBATCH -n 1 # Number of CPU cores needed
+#SBATCH -G 2 # Number of GPUs
+# #SBATCH -hold_jid NO HOLDING
+
+set -e  # optional: stop on error
+
+# Load conda module
+module load apps/binapps/anaconda3/2024.10
+
+# Activate the environment
+conda activate venv
+
+# Define variables
+CORPUS="Wiki"
+DATA_TYPE="test"
+HF_PARAPHRASE_MODEL="Llama-3.1-8B-Instruct"
+MAX_TOKENS=5000
+TEMPERATURE=0.7
+N_SAMPLES=10
+
+# Input lists produced in step 1:
+KNOWN_LIST="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/known_doc_list_test.txt"
+UNKNOWN_LIST="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/unknown_doc_list_test.txt"
+
+# ---- Select the Nth line from each list (N = SLURM_ARRAY_TASK_ID) ----
+# Using awk with a variable for safety; exit after printing to avoid scanning whole file.
+KNOWN_DOC=$(awk -v n="$SLURM_ARRAY_TASK_ID" 'NR==n {print; exit}' "$KNOWN_LIST")
+UNKNOWN_DOC=$(awk -v n="$SLURM_ARRAY_TASK_ID" 'NR==n {print; exit}' "$UNKNOWN_LIST")
+
+KNOWN_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/known_raw.jsonl"
+UNKNOWN_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/unknown_raw.jsonl"
+METADATA_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/metadata.rds"
+SAVE_LOC="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}-${HF_PARAPHRASE_MODEL}"
+COMPLETED_LOC="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}-${HF_PARAPHRASE_MODEL}-completed"
+PROMPT_LOC="/mnt/hum01-home01/d34195bc/projects/av_distributions/prompts/exhaustive_constrained_ngram_paraphraser_prompt_JSON_newv2.txt"
+MODEL_LOC="/mnt/hum01-home01/d34195bc/models/Qwen2.5-0.5B-Instruct"
+PARAPHRASE_MODEL_LOC="/mnt/hum01-home01/d34195bc/models/${HF_PARAPHRASE_MODEL}"
+
+# Get the Nth line from PARASCORE_FILE
+MYFILE=$(awk "NR==${SLURM_ARRAY_TASK_ID} {print}" "${IMPOSTOR_FILE}")
+
+# Run top impostors on the Nth file from parascore folder
+python -u /mnt/hum01-home01/d34195bc/projects/av_distributions/scripts/run_hf_paraphrase_method.py \
+    --known_loc "${KNOWN_LOC}" \
+    --unknown_loc "${UNKNOWN_LOC}" \
+    --metadata_loc "${METADATA_LOC}" \
+    --model_loc "${MODEL_LOC}" \
+    --paraphrase_model_loc "${PARAPHRASE_MODEL_LOC}" \
+    --save_loc "${SAVE_LOC}" \
+    --prompt_loc "${PROMPT_LOC}" \
+    --completed_loc "${COMPLETED_LOC}" \
+    --corpus "${CORPUS}" \
+    --data_type "${DATE_TYPE}" \
+    --known_doc "${KNOWN_DOC}" \
+    --unknown_doc "${UNKNOWN_DOC}" \
+    --max_tokens ${MAX_TOKENS} \
+    --temperature ${TEMPERATURE} \
+    --n ${N_SAMPLES} \
+    --score_texts \
+    --device "cuda"
