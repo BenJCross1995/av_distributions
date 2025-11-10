@@ -126,7 +126,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run scoring pipeline and write Excel output.")
     parser.add_argument("--data_loc", help="Path to the input Excel file (source data).")
     parser.add_argument("--save_dir", help="Directory to save the output .xlsx file.")
-    parser.add_argument("--model-loc",help="Model directory",)
+    parser.add_argument("--model_loc",help="Model directory",)
     parser.add_argument(
         "--sheet",
         dest="sheets",
