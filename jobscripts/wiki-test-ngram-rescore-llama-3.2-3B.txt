@@ -27,7 +27,7 @@ PROBLEM_DOC_LIST="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/
 
 # ---- Select the Nth line from each list (N = SLURM_ARRAY_TASK_ID) ----
 # Using awk with a variable for safety; exit after printing to avoid scanning whole file.
-DOC_LOC=$(awk -v n="$SLURM_ARRAY_TASK_ID" 'NR==n {print; exit}' "$PROBLEM_DOC_LIST.xlsx")
+DOC_LOC=$(awk -v n="$SLURM_ARRAY_TASK_ID" 'NR==n {print; exit}' "$PROBLEM_DOC_LIST")
 
 # Run top impostors on the Nth file from parascore folder
 python -u /mnt/hum01-home01/d34195bc/projects/av_distributions/scripts/run_scoring_with_new_model.py \
