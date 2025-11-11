@@ -31,6 +31,6 @@ DATA_LOC="${DATA_DIR}/${DOC_NAME}.xlsx"
 
 # Run top impostors on the Nth file from parascore folder
 python -u /mnt/hum01-home01/d34195bc/projects/av_distributions/scripts/run_scoring_with_new_model.py \
-    --data_loc "${DOC_LOC}" \
+    --data_loc "${DATA_LOC}" \
     --save_dir "${SAVE_DIR}" \
     --model_loc "${MODEL_LOC}"
