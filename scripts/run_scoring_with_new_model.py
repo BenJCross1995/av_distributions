@@ -84,7 +84,9 @@ def process_file(
         
         # Read the location and just keep phrase column
         phrase_list = pd.read_excel(phrase_loc)
-        phrases_to_keep = phrase_list[phrase_list['keep_phrase'] == 1].copy()
+        phrases_to_keep = phrase_list[
+            (phrase_list['keep_phrase'] == 1) | (phrase_list['keep_phrase'].isna())
+        ].copy()
         phrases_to_keep = phrases_to_keep[['phrase']]
         
         reference_phrases = no_context[no_context['phrase_type'] == 'reference'].copy()
