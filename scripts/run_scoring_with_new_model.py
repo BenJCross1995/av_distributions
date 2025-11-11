@@ -1,4 +1,5 @@
 import sys
+import pandas as pd
 
 from pathlib import Path
 from from_root import from_root
@@ -26,6 +27,7 @@ def process_file(
     data_loc: str | Path,
     save_dir: str | Path,
     model_loc: str | Path,
+    phrase_loc: str | Path = None,
     sheet_names: Iterable[str] = ["docs", "no context", "metadata"],
     overwrite: bool = False,
 ) -> Path:
@@ -42,7 +44,8 @@ def process_file(
     """
     data_loc = Path(data_loc)
     save_dir = Path(save_dir)
-
+    print(f"Working on file {data_loc.stem}.xlsx")
+    
     # 1) Determine write_path FIRST
     write_path = build_write_path(data_loc, save_dir)
 
@@ -76,6 +79,23 @@ def process_file(
 
     no_context = data["no context"]
 
+    # Get phrases to keep - only do this if phrase list exists
+    if phrase_loc:
+        
+        # Read the location and just keep phrase column
+        phrase_list = pd.read_excel(phrase_loc)
+        phrases_to_keep = phrase_list[phrase_list['keep_phrase'] == 1].copy()
+        phrases_to_keep = phrases_to_keep[['phrase']]
+        
+        reference_phrases = no_context[no_context['phrase_type'] == 'reference'].copy()
+
+        # Perform the merge using the tuple-based key
+        merged_phrases = pd.merge(reference_phrases, phrases_to_keep, on='phrase', how='inner')
+        merged_phrases = merged_phrases[['phrase_num']]
+
+        # Now no_context only includes relevant phrases
+        no_context = pd.merge(no_context, merged_phrases, on='phrase_num', how='inner')
+        
     # Get the n-grams in a way necessary to compute scores
     print("Getting the n-gram dictionary")
     n_gram_dict = {}
@@ -126,7 +146,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run scoring pipeline and write Excel output.")
     parser.add_argument("--data_loc", help="Path to the input Excel file (source data).")
     parser.add_argument("--save_dir", help="Directory to save the output .xlsx file.")
-    parser.add_argument("--model_loc",help="Model directory",)
+    parser.add_argument("--model_loc",help="Model directory")
+    parser.add_argument("--phrase_loc", help="Location of a file containing phrases to filter out.")
     parser.add_argument(
         "--sheet",
         dest="sheets",
