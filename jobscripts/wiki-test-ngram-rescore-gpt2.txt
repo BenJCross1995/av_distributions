@@ -16,11 +16,10 @@ conda activate venv
 # Define variables
 CORPUS="Wiki"
 DATA_TYPE="test"
-MODEL_LOC="/mnt/hum01-home01/d34195bc/models/Llama-3.2-3B"
+MODEL_LOC="/mnt/hum01-home01/d34195bc/models/gpt2"
 
 DATA_DIR="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}"
-SAVE_DIR="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}-completed-filtered-llama"
-PHRASE_LOC="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/wiki-phrase-list-reviewed.xlsx"
+SAVE_DIR="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase_examples/${CORPUS}-${DATA_TYPE}-completed-gpt2"
 
 # Input lists produced in step 1:
 PROBLEM_DOC_LIST="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/problem_doc_list.txt"
@@ -34,5 +33,4 @@ DATA_LOC="${DATA_DIR}/${DOC_NAME}.xlsx"
 python -u /mnt/hum01-home01/d34195bc/projects/av_distributions/scripts/run_scoring_with_new_model.py \
     --data_loc "${DATA_LOC}" \
     --save_dir "${SAVE_DIR}" \
-    --model_loc "${MODEL_LOC}" \
-    --phrase_loc = "${PHRASE_LOC}
+    --model_loc "${MODEL_LOC}"
