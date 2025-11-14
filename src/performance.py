@@ -57,6 +57,57 @@ def combine_and_aggregate_results_data(file_loc, method='paraphrase', group_cols
     return results
 
 # -----------------------------------------------------------------------------
+# Utilities to build a per-sample predictions table
+# -----------------------------------------------------------------------------
+
+def _label_errors(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
+    """Return array of 'TP','FP','FN','TN'."""
+    return np.where(
+        y_true & y_pred, 'TP',
+        np.where(~y_true & y_pred, 'FP',
+                 np.where(y_true & ~y_pred, 'FN', 'TN'))
+    )
+
+def _pred_rows_df(source_df: pd.DataFrame,
+                  row_index_order: list,
+                  y_true: np.ndarray,
+                  pred_probs: np.ndarray,
+                  y_pred: np.ndarray,
+                  group_cols: list | None,
+                  group_vals,
+                  id_cols: list | None) -> pd.DataFrame:
+    """
+    Build a tidy table of per-sample predictions aligned to row_index_order
+    (which should match the order of y_true/pred_probs from LOO or test).
+    """
+    eps = 1e-15
+    pred_llr = np.log10(pred_probs / (1 - pred_probs + eps))
+    errors = _label_errors(y_true.astype(bool), y_pred.astype(bool))
+
+    # Pull identifying columns (or keep index if none supplied)
+    ids = source_df.loc[row_index_order]
+    ids = ids[id_cols].reset_index(drop=False) if id_cols else ids.reset_index(drop=False)[[]]
+
+    out = pd.DataFrame({
+        'y_true': y_true.astype(bool),
+        'pred_prob': pred_probs,
+        'pred_llr': pred_llr,
+        'y_pred': y_pred.astype(bool),
+        'error': errors
+    })
+    out = pd.concat([ids, out], axis=1)
+
+    # Attach group values if provided
+    if group_cols is not None:
+        if not isinstance(group_cols, (list, tuple)):
+            group_cols = [group_cols]
+        vals = group_vals if isinstance(group_vals, tuple) else (group_vals,)
+        for col, val in zip(group_cols, vals):
+            out[col] = val
+
+    return out
+
+# -----------------------------------------------------------------------------
 # Core metric functions
 # -----------------------------------------------------------------------------
 
@@ -146,17 +197,69 @@ def performance(
     additional_metadata: dict = None,
     keep_cols: list = None,
     group_cols: list | str = None,
-) -> pd.DataFrame:
+    return_pred_rows: bool = False,       # NEW
+    id_cols: list | None = None,          # NEW (columns to carry into the per-row table)
+    decision_llr: float = 0.0,            # NEW (default matches your current llr>0 rule)
+) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Evaluate speaker‑verification metrics and optionally carry through metadata columns,
-    either once or per group, with group_cols up front in the output.
+    Evaluate speaker-verification metrics and optionally carry through metadata columns,
+    either once or per group, with `group_cols` placed up front in the output.
+
+    Parameters
+    ----------
+    df_train : pandas.DataFrame
+        Training data containing at least `score_col` and `target_col`. If `df_test`
+        is not provided, Leave-One-Out (LOO) cross-validation is performed on this
+        DataFrame to obtain predictions.
+    score_col : str
+        Name of the column with raw system scores (used as the single feature for
+        logistic calibration).
+    target_col : str
+        Name of the binary ground-truth column (True/1 = target, False/0 = non-target).
+    df_test : pandas.DataFrame, optional
+        If given, a logistic model is fit on `df_train` and evaluated on `df_test`.
+        If None (default), LOO CV is used on `df_train`.
+    additional_metadata : dict, optional
+        Static key/value pairs to copy into every output row (e.g., run identifiers).
+    keep_cols : list of str, optional
+        Column names from `df_train` whose single unique values (per group) should be
+        copied into the metrics output as metadata. Raises if a listed column is not
+        single-valued within a group.
+    group_cols : list[str] or str, optional
+        Column(s) to group `df_train` by. When provided, the model is trained and
+        evaluated independently per group. If `df_test` is provided, it is internally
+        filtered to matching rows for each group before evaluation.
+    return_pred_rows : bool, default False
+        If True, also return a per-sample predictions table with columns:
+        `['y_true', 'pred_prob', 'pred_llr', 'y_pred', 'error']`, plus any `id_cols`
+        and group identifiers. When True, the function returns a tuple
+        `(metrics_df, pred_rows_df)`; otherwise only `metrics_df`.
+    id_cols : list[str], optional
+        Column names (from the source DataFrame being evaluated—`df_train` for LOO or
+        `df_test` for train/test) to carry into the per-row predictions table for
+        identification (e.g., 'pair_id', 'doc_id_a', 'doc_id_b'). Ignored unless
+        `return_pred_rows=True`. If omitted, only the implicit index is used.
+    decision_llr : float, default 0.0
+        Threshold applied to predicted log-likelihood ratios to form hard decisions:
+        `y_pred = (pred_llr > decision_llr)`. A value of 0.0 corresponds to LR > 1.
+
+    Returns
+    -------
+    pandas.DataFrame or (pandas.DataFrame, pandas.DataFrame)
+        If `return_pred_rows=False`: a metrics DataFrame (one row overall or one per
+        group) with columns:
+        `['Cllr','Cllr_min','EER','Mean_TRUE_LLR','Mean_FALSE_LLR','TRUE_trials',
+          'FALSE_trials','AUC','Balanced_Accuracy','Precision','Recall','F1','TP','FP','FN','TN']`
+        plus any grouping columns and metadata.
+        If `return_pred_rows=True`: a tuple `(metrics_df, pred_rows_df)`, where
+        `pred_rows_df` contains one row per evaluated sample (concatenated across
+        groups if grouped).
     """
-    # Normalize group_cols to list
+
     if group_cols is not None and not isinstance(group_cols, (list, tuple)):
         group_cols = [group_cols]
 
     def _single_perf(sub_train, sub_test, group_vals=None):
-        # start row with group identifiers (if any)
         row = {}
         if group_vals is not None:
             if isinstance(group_vals, tuple):
@@ -165,7 +268,6 @@ def performance(
             else:
                 row[group_cols[0]] = group_vals
 
-        # metadata
         meta = {} if additional_metadata is None else dict(additional_metadata)
         if keep_cols:
             for c in keep_cols:
@@ -177,29 +279,35 @@ def performance(
                 meta[c] = vals[0]
         row.update(meta)
 
-        # train/test or LOO
+        # Train/test or LOO, but also keep the order of row indices for a per-row table
         if sub_test is None:
             loo = LeaveOneOut()
-            probs, truths = [], []
+            probs, truths, test_idx_order = [], [], []
             for tr_idx, te_idx in loo.split(sub_train):
                 tr = sub_train.iloc[tr_idx]
                 te = sub_train.iloc[te_idx]
                 m = LogisticRegression(solver='lbfgs')
                 m.fit(tr[[score_col]], tr[target_col])
-                p = m.predict_proba(te[[score_col]])[:,1][0]
+                p = m.predict_proba(te[[score_col]])[:, 1][0]
                 probs.append(p)
                 truths.append(bool(te[target_col].iloc[0]))
-            y_true    = np.array(truths)
+                test_idx_order.append(te.index[0])  # keep original index
+            y_true = np.array(truths)
             pred_probs = np.array(probs)
+            source_for_rows = sub_train
+            row_index_order = test_idx_order
         else:
             m = LogisticRegression(solver='lbfgs')
             m.fit(sub_train[[score_col]], sub_train[target_col])
-            pred_probs = m.predict_proba(sub_test[[score_col]])[:,1]
-            y_true     = sub_test[target_col].to_numpy()
+            pred_probs = m.predict_proba(sub_test[[score_col]])[:, 1]
+            y_true = sub_test[target_col].to_numpy()
+            source_for_rows = sub_test
+            row_index_order = list(sub_test.index)
 
-        llr = np.log10(pred_probs / (1 - pred_probs))
+        eps = 1e-15
+        llr = np.log10(pred_probs / (1 - pred_probs + eps))
+        y_pred = llr > decision_llr
 
-        # core metrics (import your own compute_cllr etc.)
         stats = {
             'Cllr': compute_cllr(pred_probs, y_true),
             'Cllr_min': compute_cllr_min(pred_probs, y_true),
@@ -209,29 +317,42 @@ def performance(
             'TRUE_trials': int(np.sum(y_true)),
             'FALSE_trials': int(len(y_true) - np.sum(y_true)),
             'AUC': float(roc_auc_score(y_true, pred_probs)),
-        }
-        y_pred = llr > 0
-        stats.update({
             'Balanced_Accuracy': float(balanced_accuracy_score(y_true, y_pred)),
             'Precision': float(precision_score(y_true, y_pred)),
             'Recall': float(recall_score(y_true, y_pred)),
             'F1': float(f1_score(y_true, y_pred)),
-        })
+        }
         tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
         stats.update({'TP': int(tp), 'FP': int(fp), 'FN': int(fn), 'TN': int(tn)})
 
         row.update(stats)
-        return row
 
-    # no grouping: single row
+        # Build per-row table if requested
+        preds_df = None
+        if return_pred_rows:
+            preds_df = _pred_rows_df(
+                source_df=source_for_rows,
+                row_index_order=row_index_order,
+                y_true=y_true,
+                pred_probs=pred_probs,
+                y_pred=y_pred,
+                group_cols=group_cols,
+                group_vals=group_vals,
+                id_cols=id_cols
+            )
+
+        return row, preds_df
+
+    # No grouping
     if group_cols is None:
-        result = _single_perf(df_train, df_test)
-        return pd.DataFrame([result])
+        metrics_row, preds_df = _single_perf(df_train, df_test, group_vals=None)
+        metrics_df = pd.DataFrame([metrics_row])
+        return (metrics_df, preds_df) if return_pred_rows else metrics_df
 
-    # per‑group
-    rows = []
+    # Per-group
+    rows, all_pred_rows = [], []
     for grp_vals, grp_df in df_train.groupby(group_cols):
-        # filter test to matching group if needed
+        # align test to group if provided
         sub_test = None
         if df_test is not None:
             mask = pd.Series(True, index=df_test.index)
@@ -239,10 +360,16 @@ def performance(
             for col, val in zip(group_cols, vals):
                 mask &= df_test[col] == val
             sub_test = df_test[mask]
+        metrics_row, preds_df = _single_perf(grp_df, sub_test, group_vals=grp_vals)
+        rows.append(metrics_row)
+        if return_pred_rows and preds_df is not None:
+            all_pred_rows.append(preds_df)
 
-        rows.append(_single_perf(grp_df, sub_test, group_vals=grp_vals))
-
-    return pd.DataFrame(rows)
+    metrics_df = pd.DataFrame(rows)
+    if return_pred_rows:
+        pred_rows_df = pd.concat(all_pred_rows, ignore_index=True) if all_pred_rows else pd.DataFrame()
+        return metrics_df, pred_rows_df
+    return metrics_df
 
 def performance_paraphrase(
     df_train: pd.DataFrame,
@@ -250,23 +377,14 @@ def performance_paraphrase(
     target_col: str,
     df_test: pd.DataFrame = None,
     additional_metadata: dict = None,
-    keep_cols: list = None
-) -> pd.DataFrame:
+    keep_cols: list = None,
+    return_pred_rows: bool = False,       # NEW
+    id_cols: list | None = None,          # NEW
+    decision_llr: float = 0.0,            # NEW
+) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Variant of `performance` that standardizes raw scores before logistic calibration.
-
-    Parameters:
-    - df_train: training DataFrame
-    - score_col: name of column containing raw system scores (e.g., log-likelihood ratios)
-    - target_col: column name for binary labels (1=target, 0=non-target)
-    - df_test: optional test DataFrame; if None, uses Leave-One-Out CV on df_train
-    - additional_metadata: dict of static metadata fields to include
-    - keep_cols: list of DataFrame columns to carry through as metadata
-
-    Returns:
-    - DataFrame with one row of metrics plus metadata
+    As before, but if `return_pred_rows=True` also returns per-sample predictions.
     """
-    # Prepare metadata
     metadata = {} if additional_metadata is None else dict(additional_metadata)
     if keep_cols:
         for col in keep_cols:
@@ -279,71 +397,64 @@ def performance_paraphrase(
                 )
             metadata[col] = unique_vals[0]
 
-    # Extract and standardize scores
     scaler = StandardScaler()
     scores_train = df_train[[score_col]].values.astype(float)
     scores_train_std = scaler.fit_transform(scores_train)
 
-    # Decide between LOO CV or train/test
     if df_test is None:
         loo = LeaveOneOut()
-        probs, truths = [], []
+        probs, truths, test_idx_order = [], [], []
         for train_idx, test_idx in loo.split(df_train):
             X_tr = scores_train_std[train_idx]
             y_tr = df_train[target_col].iloc[train_idx]
             X_te = scores_train_std[test_idx]
 
-            # Fit unregularized logistic
             model = LogisticRegression(penalty=None, solver='lbfgs', max_iter=10000)
             model.fit(X_tr, y_tr)
 
-            # Predict probability for the single test sample
             p = model.predict_proba(X_te)[:, 1][0]
             probs.append(p)
-
-            # Extract the true label as a scalar
-            true_label = df_train[target_col].iloc[test_idx[0]]
-            truths.append(bool(true_label))
+            truths.append(bool(df_train[target_col].iloc[test_idx[0]]))
+            test_idx_order.append(df_train.index[test_idx[0]])
 
         pred_probs = np.array(probs)
         y_true = np.array(truths)
-        pred_llrs = np.log10(pred_probs / (1 - pred_probs))
+        source_for_rows = df_train
+        row_index_order = test_idx_order
     else:
-        # Standardize both train and test using train statistics
         scores_test = df_test[[score_col]].values.astype(float)
         scores_test_std = scaler.transform(scores_test)
 
-        # Fit unregularized logistic
         model = LogisticRegression(penalty=None, solver='lbfgs', max_iter=10000)
         model.fit(scores_train_std, df_train[target_col])
 
-        # Predict on test set
         pred_probs = model.predict_proba(scores_test_std)[:, 1]
         y_true = df_test[target_col].to_numpy()
-        pred_llrs = np.log10(pred_probs / (1 - pred_probs))
+        source_for_rows = df_test
+        row_index_order = list(df_test.index)
 
-    # Compute metrics (reuse your existing functions)
     cllr = compute_cllr(pred_probs, y_true)
     cllr_min = compute_cllr_min(pred_probs, y_true)
     eer = compute_eer(pred_probs, y_true)
     auc_val = float(roc_auc_score(y_true, pred_probs))
 
-    # Classify at LLR=0 threshold
-    y_pred = pred_llrs > 0
+    eps = 1e-15
+    pred_llrs = np.log10(pred_probs / (1 - pred_probs + eps))
+    y_pred = pred_llrs > decision_llr
+
     bal_acc = float(balanced_accuracy_score(y_true, y_pred))
     precision = float(precision_score(y_true, y_pred))
     recall = float(recall_score(y_true, y_pred))
     f1 = float(f1_score(y_true, y_pred))
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
 
-    # Log-likelihood stats
     mean_true_llr = float(np.mean(pred_llrs[y_true]))
     mean_false_llr = float(np.mean(pred_llrs[~y_true]))
     true_trials = int(np.sum(y_true))
     false_trials = int(len(y_true) - true_trials)
 
-    # Compile results
     metrics = {
+        **metadata,
         'Cllr': cllr,
         'Cllr_min': cllr_min,
         'EER': eer,
@@ -361,8 +472,22 @@ def performance_paraphrase(
         'FN': fn,
         'TN': tn,
     }
-    results = {**metadata, **metrics}
-    return pd.DataFrame([results])
+    metrics_df = pd.DataFrame([metrics])
+
+    if not return_pred_rows:
+        return metrics_df
+
+    preds_df = _pred_rows_df(
+        source_df=source_for_rows,
+        row_index_order=row_index_order,
+        y_true=y_true,
+        pred_probs=pred_probs,
+        y_pred=y_pred,
+        group_cols=None,
+        group_vals=None,
+        id_cols=id_cols
+    )
+    return metrics_df, preds_df
 
 # -----------------------------------------------------------------------------
 # Plotting functions
