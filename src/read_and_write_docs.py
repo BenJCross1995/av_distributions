@@ -41,6 +41,11 @@ def read_xml(location: Union[str, Path]) -> str:
     # Read and return the file contents as a single string
     return path.read_text(encoding='utf-8')
 
+def read_txt(file_path):
+    """Read a .txt file and return its contents as a string."""
+    with open(file_path, "r", encoding="utf-8") as f:
+        return f.read()
+    
 def write_jsonl(data, output_file_path):
     """Writes a pandas DataFrame to a JSONL file."""
     with open(output_file_path, 'w', encoding='utf-8') as file:
