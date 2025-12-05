@@ -15,7 +15,7 @@ conda activate venv
 
 # Define variables
 CORPUS="Wiki"
-DATA_TYPE="test"
+DATA_TYPE="training"
 PARA_MODEL_TYPE="ModernBERT-base"
 SCORE_MODEL_TYPE="gpt2"
 MODEL_LOC="/mnt/hum01-home01/d34195bc/models/gpt2"
