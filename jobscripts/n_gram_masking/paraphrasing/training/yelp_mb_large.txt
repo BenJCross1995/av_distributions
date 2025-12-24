@@ -1,7 +1,7 @@
 #!/bin/bash --login
 
-#SBATCH -J Wiki_test_para_MODERNBERT_BASE
-#SBATCH -a 1-672
+#SBATCH -J Yelp_tr_mb_l
+#SBATCH -a 1-1600
 #SBATCH -p himem
 #SBATCH -t 7-0
 
@@ -14,9 +14,9 @@ module load apps/binapps/anaconda3/2024.10
 conda activate venv
 
 # Define variables
-CORPUS="Wiki"
-DATA_TYPE="test"
-MODEL="ModernBERT-base"
+CORPUS="Yelp"
+DATA_TYPE="training"
+MODEL="ModernBERT-large"
 MODEL_LOC="/mnt/hum01-home01/d34195bc/models/${MODEL}"
 
 # Input lists produced in step 1:
@@ -31,8 +31,8 @@ UNKNOWN_DOC=$(awk -v n="$SLURM_ARRAY_TASK_ID" 'NR==n {print; exit}' "$UNKNOWN_LI
 KNOWN_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/known_raw.jsonl"
 UNKNOWN_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/${CORPUS}/unknown_raw.jsonl"
 METADATA_LOC="/mnt/hum01-home01/d34195bc/av_datasets/${DATA_TYPE}/metadata.rds"
-SAVE_LOC="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase examples masking v2/raw-${MODEL}"
-COMPLETED_LOC="/mnt/hum01-home01/d34195bc/av_datasets/paraphrase examples masking v2/raw-${MODEL}"
+SAVE_LOC="/mnt/hum01-home01/d34195bc/av_datasets_experiments/ngram_masking/${DATA_TYPE}/${CORPUS}/${MODEL}/raw"
+COMPLETED_LOC="/mnt/hum01-home01/d34195bc/av_datasets_experiments/ngram_masking/${DATA_TYPE}/${CORPUS}/${MODEL}/raw"
 
 # ---- Select the Nth line from each list (N = SLURM_ARRAY_TASK_ID) ----
 # Using awk with a variable for safety; exit after printing to avoid scanning whole file.
