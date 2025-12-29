@@ -22,7 +22,6 @@ PARA_MODEL="ModernBERT-large"
 SCORE_MODEL="gpt2"
 MODEL_LOC="${BASE_LOC}/models/gpt2"
 
-av_datasets_experiments
 DATA_BASE_LOC="${BASE_LOC}/av_datasets_experiments/ngram_masking"
 
 DATA_DIR="${DATA_BASE_LOC}/${DATA_TYPE}/${CORPUS}/${PARA_MODEL}/raw"
