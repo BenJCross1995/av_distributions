@@ -1,6 +1,6 @@
 #!/bin/bash --login
 
-#SBATCH -J Enron-test-mb-b-gpt2
+#SBATCH -J Enron-test-mb-l-gpt2
 #SBATCH -a 1-340 # Change to the amount in the list
 #SBATCH -p himem
 #SBATCH -t 7-0
