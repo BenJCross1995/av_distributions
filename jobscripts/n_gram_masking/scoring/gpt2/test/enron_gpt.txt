@@ -1,0 +1,42 @@
+#!/bin/bash --login
+
+#SBATCH -J Enron-test-gpt-gpt2
+#SBATCH -a 1-340 # Change to the amount in the list
+#SBATCH -p himem
+#SBATCH -t 7-0
+
+set -e  # optional: stop on error
+
+# Load conda module
+module load apps/binapps/anaconda3/2024.10
+
+# Activate the environment
+conda activate venv
+
+# Define variables
+BASE_LOC="/mnt/hum01-home01/d34195bc"
+CORPUS="Enron"
+DATA_TYPE="test"
+
+PARA_MODEL="GPT_4_1"
+SCORE_MODEL="gpt2"
+MODEL_LOC="${BASE_LOC}/models/gpt2"
+
+DATA_BASE_LOC="${BASE_LOC}/av_datasets_experiments/ngram_masking"
+
+DATA_DIR="${DATA_BASE_LOC}/${DATA_TYPE}/${CORPUS}/${PARA_MODEL}/raw"
+SAVE_DIR="${DATA_BASE_LOC}/${DATA_TYPE}/${CORPUS}/${PARA_MODEL}/${SCORE_MODEL} results/raw"
+
+# Input lists produced in step 1:
+PROBLEM_DOC_LIST="${BASE_LOC}/av_datasets/${DATA_TYPE}/${CORPUS}/problem_doc_list.txt"
+
+# ---- Select the Nth line from each list (N = SLURM_ARRAY_TASK_ID) ----
+# Using awk with a variable for safety; exit after printing to avoid scanning whole file.
+DOC_NAME=$(awk -v n="$SLURM_ARRAY_TASK_ID" 'NR==n {print; exit}' "$PROBLEM_DOC_LIST")
+DATA_LOC="${DATA_DIR}/${DOC_NAME}.xlsx"
+
+# Run top impostors on the Nth file from parascore folder
+python -u "${BASE_LOC}/projects/av_distributions/scripts/run_scoring_with_new_model.py" \
+    --data_loc "${DATA_LOC}" \
+    --save_dir "${SAVE_DIR}" \
+    --model_loc "${MODEL_LOC}"
