@@ -1,6 +1,6 @@
 #!/bin/bash --login
 
-#SBATCH -J Wiki_test_mb_b
+#SBATCH -J Wiki_t_gpt2
 #SBATCH -a 1-5
 #SBATCH -p himem
 #SBATCH -t 7-0
@@ -16,7 +16,7 @@ conda activate venv
 # Define variables
 CORPUS="Wiki"
 DATA_TYPE="test"
-MODEL="ModernBERT-base"
+MODEL="gpt2"
 MODEL_LOC="/mnt/hum01-home01/d34195bc/models/${MODEL}"
 
 # Input lists produced in step 1:
