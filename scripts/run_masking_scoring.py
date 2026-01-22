@@ -130,6 +130,7 @@ def main():
     problem_metadata = agg_metadata[(agg_metadata['known_doc_id'] == args.known_doc)
                                     & (agg_metadata['unknown_doc_id'] == args.unknown_doc)].reset_index()
     problem_metadata['target'] = problem_metadata['known_author'] == problem_metadata['unknown_author']
+    problem_metadata['scoring_model'] = model_name
 
     # -----
     # Create document dataframe
@@ -177,7 +178,7 @@ def main():
         known_scored,
         unknown_scored,
         no_context_scored,
-        metadata,
+        problem_metadata,
         docs_df,
         save_loc
     )
