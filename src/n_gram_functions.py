@@ -818,44 +818,122 @@ def score_phrases(
         "raw_prob",
     ])
 
-def get_scored_df(n_gram_dict, full_text, tokenizer, model):
-    """Row-concat each scored df, add phrase_num, sort, then rank paraphrases within each phrase_num."""
-    dfs = []
-    for phrase_num, entry in n_gram_dict.items():  # relies on insertion order
-        print(f"Processing Phrase - {phrase_num}")
-        phrase = entry["phrase"]
-        paraphrases = entry["paraphrases"]
+def score_phrases(
+    base_text: str,
+    ref_phrase: str,
+    paraphrases: list[str] | None,
+    tokenizer,
+    model
+) -> pd.DataFrame:
+    """
+    Returns rows for the reference and (optionally) each paraphrase with:
+      sum_log_probs_phrase (log-likelihood contribution for the phrase tokens given the base) and
+      raw_prob = exp(sum_log_probs_phrase)
 
-        base_text = keep_before_phrase(full_text, phrase)
+    Works when paraphrases is None or [] (scores reference only).
+    """
 
-        df = score_phrases(base_text, phrase, paraphrases, tokenizer, model).copy()
-        df.insert(0, "original_phrase", phrase)
-        df.insert(0, "phrase_num", phrase_num)  # first column
-        dfs.append(df)
+    base_text = base_text or ""
+    ref_phrase = ref_phrase or ""
+    paraphrases = paraphrases or []
 
-    if not dfs:
-        return pd.DataFrame(columns=["phrase_num"])
+    # Score base_text once
+    if base_text:
+        base_tokens, base_log_probs, _ = compute_log_probs_with_median(base_text, tokenizer, model)
+        base_total = sum(base_log_probs)
+        n_base_tokens = len(base_tokens)
+    else:
+        base_total = 0.0
+        n_base_tokens = 0
 
-    out = pd.concat(dfs, ignore_index=True)
+    items = [("reference", ref_phrase)] + [("paraphrase", p or "") for p in paraphrases]
+    rows = []
 
-    # sort by phrase_num (zero-padded → lexicographic == numeric)
-    out = out.sort_values("phrase_num", kind="mergesort").reset_index(drop=True)
+    for ptype, phrase in items:
+        full_text = base_text + phrase
+        full_tokens, full_log_probs, _ = compute_log_probs_with_median(full_text, tokenizer, model)
+        full_total = sum(full_log_probs)
 
-    # rank within phrase_num: reference -> 0; paraphrases ranked by descending raw_prob starting at 1
-    out["rank"] = None
-    mask = out["phrase_type"].eq("paraphrase")
-    out.loc[mask, "rank"] = (
-        out.loc[mask]
-           .groupby("phrase_num")["raw_prob"]
-           .rank(method="first", ascending=False)
-           .astype(int)
-    )
-    out.loc[out["phrase_type"].eq("reference"), "rank"] = 0
-    out["rank"] = out["rank"].astype(int)
+        phrase_tokens = full_tokens[n_base_tokens:]
+        phrase_log_probs = full_log_probs[n_base_tokens:]
+        phrase_total = sum(phrase_log_probs)
 
-    out = out.sort_values(["phrase_num", "rank"], kind="mergesort").reset_index(drop=True)
+        rows.append({
+            "phrase_type":               ptype,
+            "phrase":                    phrase,
+            "tokens":                    phrase_tokens,
+            "sum_log_probs_base":        base_total,
+            "sum_log_probs_inc_phrase":  full_total,
+            "difference":                base_total - full_total,
+            "phrase_log_probs":          phrase_log_probs,
+            "sum_log_probs_phrase":      phrase_total,
+            "raw_prob":                  math.exp(phrase_total),
+        })
 
-    return out
+    return pd.DataFrame(rows, columns=[
+        "phrase_type", "phrase", "tokens",
+        "sum_log_probs_base", "sum_log_probs_inc_phrase",
+        "difference", "phrase_log_probs", "sum_log_probs_phrase",
+        "raw_prob",
+    ])
+    
+def score_reference_only(
+    base_text: str,
+    ref_phrase: str,
+    tokenizer,
+    model,
+) -> pd.DataFrame:
+    """
+    Score ONLY the reference phrase (no paraphrases) in the context of base_text.
+
+    Returns a 1-row DataFrame with:
+      - sum_log_probs_phrase: log-likelihood contribution for the phrase tokens given the base
+      - raw_prob: exp(sum_log_probs_phrase)
+
+    Note: No `phrase_type` column is included.
+    """
+
+    base_text = base_text or ""
+    ref_phrase = ref_phrase or ""
+
+    # 1) Score base_text once
+    if base_text:
+        base_tokens, base_log_probs, _ = compute_log_probs_with_median(base_text, tokenizer, model)
+        base_total = sum(base_log_probs)
+        n_base_tokens = len(base_tokens)
+    else:
+        base_total = 0.0
+        n_base_tokens = 0
+
+    # 2) Score full sequence once
+    full_text = base_text + ref_phrase
+    full_tokens, full_log_probs, _ = compute_log_probs_with_median(full_text, tokenizer, model)
+    full_total = sum(full_log_probs)
+
+    # 3) Phrase contribution = suffix after the base token prefix
+    phrase_tokens = full_tokens[n_base_tokens:]
+    phrase_log_probs = full_log_probs[n_base_tokens:]
+    phrase_total = sum(phrase_log_probs)
+
+    raw_prob = math.exp(phrase_total)  # may underflow to 0.0 for long phrases
+
+    row = {
+        "phrase":                    ref_phrase,
+        "tokens":                    phrase_tokens,
+        "sum_log_probs_base":        base_total,
+        "sum_log_probs_inc_phrase":  full_total,
+        "difference":                base_total - full_total,
+        "phrase_log_probs":          phrase_log_probs,
+        "sum_log_probs_phrase":      phrase_total,
+        "raw_prob":                  raw_prob,
+    }
+
+    return pd.DataFrame([row], columns=[
+        "phrase", "tokens",
+        "sum_log_probs_base", "sum_log_probs_inc_phrase",
+        "difference", "phrase_log_probs", "sum_log_probs_phrase",
+        "raw_prob",
+    ])
 
 def get_scored_df(n_gram_dict, full_text, tokenizer, model):
     """
